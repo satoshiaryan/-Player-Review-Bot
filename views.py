@@ -1,5 +1,6 @@
 import discord
 from typing import Optional
+from datetime import datetime
 
 class ReviewEditView(discord.ui.View):
     def __init__(self, review_id: int, database, config):
@@ -10,8 +11,8 @@ class ReviewEditView(discord.ui.View):
     
     async def check_permission(self, interaction: discord.Interaction) -> bool:
         """Check if user has permission to edit"""
-        # Bot owner always has permission
-        if interaction.user.id == 123456789012345678:  # REPLACE WITH YOUR ID
+        # Bot owner always has permission (REPLACE WITH YOUR ID)
+        if interaction.user.id == 1214456066687893506:
             return True
         
         # Check if user has reviewer role
@@ -38,28 +39,28 @@ class ReviewEditView(discord.ui.View):
     async def edit_pros(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not await self.check_permission(interaction):
             return await self.handle_no_permission(interaction)
-        modal = EditModal("pros", self.review_id, self.db, "Enter the pros (one per line)")
+        modal = EditModal("pros", self.review_id, self.db, self.config, "Enter the pros (one per line)")
         await interaction.response.send_modal(modal)
     
     @discord.ui.button(label="Edit Cons", style=discord.ButtonStyle.red, custom_id="edit_cons", row=1)
     async def edit_cons(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not await self.check_permission(interaction):
             return await self.handle_no_permission(interaction)
-        modal = EditModal("cons", self.review_id, self.db, "Enter the cons (one per line)")
+        modal = EditModal("cons", self.review_id, self.db, self.config, "Enter the cons (one per line)")
         await interaction.response.send_modal(modal)
     
     @discord.ui.button(label="Edit Verdict", style=discord.ButtonStyle.blurple, custom_id="edit_verdict", row=1)
     async def edit_verdict(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not await self.check_permission(interaction):
             return await self.handle_no_permission(interaction)
-        modal = EditModal("verdict", self.review_id, self.db, "Enter your final verdict")
+        modal = EditModal("verdict", self.review_id, self.db, self.config, "Enter your final verdict")
         await interaction.response.send_modal(modal)
     
     @discord.ui.button(label="Edit Alternatives", style=discord.ButtonStyle.grey, custom_id="edit_alternatives", row=1)
     async def edit_alternatives(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not await self.check_permission(interaction):
             return await self.handle_no_permission(interaction)
-        modal = EditModal("alternatives", self.review_id, self.db, "Enter alternative players")
+        modal = EditModal("alternatives", self.review_id, self.db, self.config, "Enter alternative players")
         await interaction.response.send_modal(modal)
     
     @discord.ui.button(label="🔄 Refresh", style=discord.ButtonStyle.secondary, custom_id="refresh_review", row=2)
@@ -81,11 +82,12 @@ class ReviewEditView(discord.ui.View):
         await interaction.response.edit_message(content="🗑️ **Review Deleted**", embed=None, view=None)
 
 class EditModal(discord.ui.Modal):
-    def __init__(self, field: str, review_id: int, database, placeholder: str):
+    def __init__(self, field: str, review_id: int, database, config, placeholder: str):
         super().__init__(title=f"Edit {field.title()}")
         self.field = field
         self.review_id = review_id
         self.db = database
+        self.config = config
         
         self.text_input = discord.ui.TextInput(
             label=placeholder,
@@ -103,17 +105,13 @@ class EditModal(discord.ui.Modal):
         review = self.db.get_review(self.review_id)
         if review:
             embed = create_review_embed(review)
-            # Get config from bot for the view
-            from bot import config
-            view = ReviewEditView(self.review_id, self.db, config)
+            view = ReviewEditView(self.review_id, self.db, self.config)
             await interaction.response.edit_message(embed=embed, view=view)
         else:
             await interaction.response.send_message("Error: Review not found!", ephemeral=True)
 
 def create_review_embed(review: dict) -> discord.Embed:
     """Create a formatted embed for a review"""
-    from datetime import datetime
-    
     embed = discord.Embed(
         title=f"📋 {review['player_name']} {review['rating']}",
         color=discord.Color.gold(),
