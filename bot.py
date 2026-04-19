@@ -9,6 +9,7 @@ from views import ReviewEditView, create_review_embed
 from utils import parse_stats_input
 import threading
 from flask import Flask
+import json
 
 # --- Flask Web Server (for Render health checks) ---
 app = Flask(__name__)
@@ -24,6 +25,42 @@ def run_flask():
 # --- Discord Bot Setup ---
 load_dotenv()
 
+# === CONFIGURATION ===
+# Add your Discord User ID here (the bot owner)
+BOT_OWNER_ID = 123456789012345678  # REPLACE WITH YOUR DISCORD USER ID
+
+# List of user IDs allowed to use /review command
+ALLOWED_REVIEWERS = [
+    123456789012345678,  # You
+    # Add more user IDs here
+]
+
+# File to store the reviewer role ID
+CONFIG_FILE = "bot_config.json"
+
+class BotConfig:
+    def __init__(self):
+        self.data = self.load()
+    
+    def load(self):
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, 'r') as f:
+                return json.load(f)
+        return {"reviewer_role_id": None}
+    
+    def save(self):
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(self.data, f)
+    
+    def get_reviewer_role_id(self):
+        return self.data.get("reviewer_role_id")
+    
+    def set_reviewer_role_id(self, role_id):
+        self.data["reviewer_role_id"] = role_id
+        self.save()
+
+config = BotConfig()
+
 class FCMReviewBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
@@ -36,18 +73,46 @@ class FCMReviewBot(commands.Bot):
     async def setup_hook(self):
         await self.tree.sync()
         print(f"Synced commands for {self.user}")
-        self.add_view(ReviewEditView(0, self.db))
+        self.add_view(ReviewEditView(0, self.db, config))
 
 bot = FCMReviewBot()
 
+# === PERMISSION CHECK FUNCTIONS ===
+def is_allowed_reviewer(user_id: int) -> bool:
+    """Check if user is allowed to create reviews"""
+    return user_id in ALLOWED_REVIEWERS
+
+async def has_reviewer_role(interaction: discord.Interaction) -> bool:
+    """Check if user has the reviewer role"""
+    role_id = config.get_reviewer_role_id()
+    if not role_id:
+        return False
+    
+    role = interaction.guild.get_role(role_id)
+    if not role:
+        return False
+    
+    return role in interaction.user.roles
+
+def is_bot_owner(user_id: int) -> bool:
+    """Check if user is the bot owner"""
+    return user_id == BOT_OWNER_ID
+
+# === BOT EVENTS ===
 @bot.event
 async def on_ready():
     print(f'✅ Logged in as {bot.user} (ID: {bot.user.id})')
     print(f'📊 Total reviews in database: {bot.db.get_review_count()}')
+    print(f'👑 Bot Owner ID: {BOT_OWNER_ID}')
+    print(f'📝 Allowed Reviewers: {ALLOWED_REVIEWERS}')
+    reviewer_role = config.get_reviewer_role_id()
+    if reviewer_role:
+        print(f'🎭 Reviewer Role ID: {reviewer_role}')
     print('------')
 
-# Slash Commands
-@bot.tree.command(name="review", description="Start a new player review")
+# === SLASH COMMANDS ===
+
+@bot.tree.command(name="review", description="Start a new player review (Restricted)")
 @app_commands.describe(
     player_name="Name of the player",
     rating="Overall rating (e.g., 97 OVR)",
@@ -61,6 +126,14 @@ async def review_command(
     stats: str,
     image: discord.Attachment
 ):
+    # Check if user is allowed
+    if not is_allowed_reviewer(interaction.user.id):
+        await interaction.response.send_message(
+            "❌ **Permission Denied**\nYou are not authorized to create reviews.",
+            ephemeral=True
+        )
+        return
+    
     await interaction.response.defer()
     
     review_id = bot.db.add_review(
@@ -74,9 +147,147 @@ async def review_command(
     
     review = bot.db.get_review(review_id)
     embed = create_review_embed(review)
-    view = ReviewEditView(review_id, bot.db)
+    view = ReviewEditView(review_id, bot.db, config)
     
     await interaction.followup.send(embed=embed, view=view)
+
+@bot.tree.command(name="assign_reviewer_role", description="Set the role that can edit reviews (Bot Owner Only)")
+@app_commands.describe(role="The role to assign for editing reviews")
+async def assign_reviewer_role(interaction: discord.Interaction, role: discord.Role):
+    # Only bot owner can use this
+    if not is_bot_owner(interaction.user.id):
+        await interaction.response.send_message(
+            "❌ **Permission Denied**\nOnly the bot owner can use this command.",
+            ephemeral=True
+        )
+        return
+    
+    config.set_reviewer_role_id(role.id)
+    
+    embed = discord.Embed(
+        title="✅ Reviewer Role Set",
+        description=f"Users with the **{role.name}** role can now edit reviews.",
+        color=discord.Color.green()
+    )
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="check_reviewer_role", description="Check the current reviewer role (Bot Owner Only)")
+async def check_reviewer_role(interaction: discord.Interaction):
+    if not is_bot_owner(interaction.user.id):
+        await interaction.response.send_message(
+            "❌ **Permission Denied**\nOnly the bot owner can use this command.",
+            ephemeral=True
+        )
+        return
+    
+    role_id = config.get_reviewer_role_id()
+    if role_id:
+        role = interaction.guild.get_role(role_id)
+        if role:
+            await interaction.response.send_message(
+                f"✅ Current reviewer role: **{role.name}** (ID: {role.id})",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                "⚠️ Reviewer role is set but no longer exists in this server.",
+                ephemeral=True
+            )
+    else:
+        await interaction.response.send_message(
+            "❌ No reviewer role has been set yet.\nUse `/assign_reviewer_role` to set one.",
+            ephemeral=True
+        )
+
+@bot.tree.command(name="add_reviewer", description="Add a user ID to allowed reviewers (Bot Owner Only)")
+@app_commands.describe(user_id="The Discord User ID to add")
+async def add_reviewer(interaction: discord.Interaction, user_id: str):
+    if not is_bot_owner(interaction.user.id):
+        await interaction.response.send_message(
+            "❌ **Permission Denied**\nOnly the bot owner can use this command.",
+            ephemeral=True
+        )
+        return
+    
+    try:
+        uid = int(user_id)
+        if uid not in ALLOWED_REVIEWERS:
+            ALLOWED_REVIEWERS.append(uid)
+            await interaction.response.send_message(
+                f"✅ Added user ID `{uid}` to allowed reviewers.",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                f"⚠️ User ID `{uid}` is already in the allowed list.",
+                ephemeral=True
+            )
+    except ValueError:
+        await interaction.response.send_message(
+            "❌ Invalid user ID. Please provide a numeric ID.",
+            ephemeral=True
+        )
+
+@bot.tree.command(name="remove_reviewer", description="Remove a user ID from allowed reviewers (Bot Owner Only)")
+@app_commands.describe(user_id="The Discord User ID to remove")
+async def remove_reviewer(interaction: discord.Interaction, user_id: str):
+    if not is_bot_owner(interaction.user.id):
+        await interaction.response.send_message(
+            "❌ **Permission Denied**\nOnly the bot owner can use this command.",
+            ephemeral=True
+        )
+        return
+    
+    try:
+        uid = int(user_id)
+        if uid == BOT_OWNER_ID:
+            await interaction.response.send_message(
+                "❌ Cannot remove the bot owner from the allowed list.",
+                ephemeral=True
+            )
+        elif uid in ALLOWED_REVIEWERS:
+            ALLOWED_REVIEWERS.remove(uid)
+            await interaction.response.send_message(
+                f"✅ Removed user ID `{uid}` from allowed reviewers.",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                f"⚠️ User ID `{uid}` is not in the allowed list.",
+                ephemeral=True
+            )
+    except ValueError:
+        await interaction.response.send_message(
+            "❌ Invalid user ID. Please provide a numeric ID.",
+            ephemeral=True
+        )
+
+@bot.tree.command(name="list_reviewers", description="List all allowed reviewers (Bot Owner Only)")
+async def list_reviewers(interaction: discord.Interaction):
+    if not is_bot_owner(interaction.user.id):
+        await interaction.response.send_message(
+            "❌ **Permission Denied**\nOnly the bot owner can use this command.",
+            ephemeral=True
+        )
+        return
+    
+    embed = discord.Embed(
+        title="📋 Allowed Reviewers",
+        color=discord.Color.blue(),
+        description=f"Total: {len(ALLOWED_REVIEWERS)} users"
+    )
+    
+    for uid in ALLOWED_REVIEWERS:
+        user = bot.get_user(uid)
+        username = user.name if user else "Unknown User"
+        crown = " 👑" if uid == BOT_OWNER_ID else ""
+        embed.add_field(
+            name=f"{username}{crown}",
+            value=f"ID: `{uid}`",
+            inline=False
+        )
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="list_reviews", description="List all reviews in the database")
 async def list_reviews(interaction: discord.Interaction):
@@ -112,13 +323,20 @@ async def get_review(interaction: discord.Interaction, review_id: int):
         return
     
     embed = create_review_embed(review)
-    view = ReviewEditView(review_id, bot.db)
+    view = ReviewEditView(review_id, bot.db, config)
     
     await interaction.response.send_message(embed=embed, view=view)
 
 @bot.tree.command(name="backup", description="Create and download a backup of all reviews")
 @app_commands.default_permissions(administrator=True)
 async def backup_command(interaction: discord.Interaction):
+    if not is_bot_owner(interaction.user.id):
+        await interaction.response.send_message(
+            "❌ **Permission Denied**\nOnly the bot owner can use this command.",
+            ephemeral=True
+        )
+        return
+    
     await interaction.response.defer(ephemeral=True)
     
     backup_path = bot.db.create_backup()
@@ -135,6 +353,13 @@ async def backup_command(interaction: discord.Interaction):
 @app_commands.default_permissions(administrator=True)
 @app_commands.describe(backup_file="The .db backup file to restore from")
 async def restore_command(interaction: discord.Interaction, backup_file: discord.Attachment):
+    if not is_bot_owner(interaction.user.id):
+        await interaction.response.send_message(
+            "❌ **Permission Denied**\nOnly the bot owner can use this command.",
+            ephemeral=True
+        )
+        return
+    
     if not backup_file.filename.endswith('.db'):
         await interaction.response.send_message("Please upload a valid .db file!", ephemeral=True)
         return
@@ -166,7 +391,9 @@ async def stats_command(interaction: discord.Interaction):
         timestamp=datetime.now()
     )
     embed.add_field(name="Total Reviews", value=str(review_count), inline=True)
-    embed.add_field(name="Database Size", value=f"{os.path.getsize('fcm_reviews.db') / 1024:.2f} KB", inline=True)
+    
+    db_size = os.path.getsize('fcm_reviews.db') / 1024 if os.path.exists('fcm_reviews.db') else 0
+    embed.add_field(name="Database Size", value=f"{db_size:.2f} KB", inline=True)
     embed.add_field(name="Latency", value=f"{round(bot.latency * 1000)}ms", inline=True)
     
     await interaction.response.send_message(embed=embed)
@@ -181,19 +408,19 @@ async def help_command(interaction: discord.Interaction):
     
     embed.add_field(
         name="Creating a Review",
-        value="Use `/review` command with player name, rating, stats, and card image",
+        value="Use `/review` command (Restricted to approved reviewers)",
         inline=False
     )
     
     embed.add_field(
         name="Editing Reviews",
-        value="Click the buttons below any review to edit pros, cons, verdict, or alternatives",
+        value="Users with the assigned reviewer role can click the edit buttons",
         inline=False
     )
     
     embed.add_field(
         name="Backup System",
-        value="Admins can use `/backup` to download database\nUse `/restore` with a backup file to restore",
+        value="Bot owner can use `/backup` and `/restore`",
         inline=False
     )
     
@@ -209,10 +436,9 @@ async def help_command(interaction: discord.Interaction):
 if __name__ == "__main__":
     # Start Flask server in a background thread
     flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True  # This ensures the thread closes when the bot stops
+    flask_thread.daemon = True
     flask_thread.start()
     
-    # Start Discord Bot (this blocks the main thread)
     token = os.getenv('DISCORD_TOKEN')
     if not token:
         print("❌ ERROR: No token found in .env file!")
