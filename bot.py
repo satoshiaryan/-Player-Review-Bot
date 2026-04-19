@@ -27,11 +27,11 @@ load_dotenv()
 
 # === CONFIGURATION ===
 # Add your Discord User ID here (the bot owner)
-BOT_OWNER_ID = 123456789012345678  # REPLACE WITH YOUR DISCORD USER ID
+BOT_OWNER_ID = 1214456066687893506 # REPLACE WITH YOUR DISCORD USER ID
 
 # List of user IDs allowed to use /review command
 ALLOWED_REVIEWERS = [
-    123456789012345678,  # You
+    553418145063239684,  # You
     # Add more user IDs here
 ]
 
