@@ -71,7 +71,7 @@ class ReviewSelect(discord.ui.Select):
         self.config = config
         
         options = []
-        for review in matching_reviews[:25]:  # Discord limits to 25 options
+        for review in matching_reviews[:25]:
             status = "✅" if review['verdict'] != 'Pending' else "⏳"
             label = f"{review['player_name']} {review['rating']}"
             if len(label) > 100:
@@ -147,6 +147,10 @@ async def has_reviewer_role(interaction: discord.Interaction) -> bool:
 def is_bot_owner(user_id: int) -> bool:
     return user_id == BOT_OWNER_ID
 
+def format_stats(pace: str, shooting: str, passing: str, dribbling: str, defending: str, physical: str) -> str:
+    """Format the stats into a clean display string"""
+    return f"**PAC:** {pace} | **SHO:** {shooting} | **PAS:** {passing}\n**DRI:** {dribbling} | **DEF:** {defending} | **PHY:** {physical}"
+
 # === BOT EVENTS ===
 @bot.event
 async def on_ready():
@@ -163,16 +167,26 @@ async def on_ready():
 
 @bot.tree.command(name="review", description="Start a new player review (Restricted)")
 @app_commands.describe(
-    player_name="Name of the player",
+    player_name="Name of the player (e.g., Kylian Mbappé)",
     rating="Overall rating (e.g., 97 OVR)",
-    stats="Base stats (e.g., PAC: 95, SHO: 88, PAS: 82)",
+    pace="PACE stat (e.g., 97)",
+    shooting="SHOOTING stat (e.g., 94)",
+    passing="PASSING stat (e.g., 88)",
+    dribbling="DRIBBLING stat (e.g., 95)",
+    defending="DEFENDING stat (e.g., 40)",
+    physical="PHYSICAL stat (e.g., 78)",
     image="Upload the player card image"
 )
 async def review_command(
     interaction: discord.Interaction,
     player_name: str,
     rating: str,
-    stats: str,
+    pace: str,
+    shooting: str,
+    passing: str,
+    dribbling: str,
+    defending: str,
+    physical: str,
     image: discord.Attachment
 ):
     if not is_allowed_reviewer(interaction.user.id):
@@ -184,11 +198,14 @@ async def review_command(
     
     await interaction.response.defer()
     
+    # Format stats for storage
+    stats_display = format_stats(pace, shooting, passing, dribbling, defending, physical)
+    
     review_id = bot.db.add_review(
         player_name=player_name,
         rating=rating,
         image_url=image.url,
-        base_stats=stats,
+        base_stats=stats_display,
         reviewer_id=str(interaction.user.id),
         reviewer_name=interaction.user.display_name
     )
@@ -202,7 +219,6 @@ async def review_command(
 @bot.tree.command(name="search", description="Search for a player review by name")
 @app_commands.describe(player_name="Name of the player to search for")
 async def search_command(interaction: discord.Interaction, player_name: str):
-    """Search reviews by player name and show a dropdown to select"""
     reviews = bot.db.get_all_reviews()
     
     matching_reviews = [
@@ -468,7 +484,7 @@ async def help_command(interaction: discord.Interaction):
     
     embed.add_field(
         name="📝 `/review`",
-        value="Create a new player review (Restricted to approved reviewers)\nFormat: `PAC: 95, SHO: 88, PAS: 82`",
+        value="Create a new player review with individual stats:\n**PACE, SHOOTING, PASSING, DRIBBLING, DEFENDING, PHYSICAL**",
         inline=False
     )
     
