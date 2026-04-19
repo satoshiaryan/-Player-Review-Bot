@@ -26,16 +26,12 @@ def run_flask():
 load_dotenv()
 
 # === CONFIGURATION ===
-# Add your Discord User ID here (the bot owner)
-BOT_OWNER_ID = 1214456066687893506 # REPLACE WITH YOUR DISCORD USER ID
+BOT_OWNER_ID = 1214456066687893506
 
-# List of user IDs allowed to use /review command
 ALLOWED_REVIEWERS = [
-    553418145063239684,  # You
-    # Add more user IDs here
+    553418145063239684,
 ]
 
-# File to store the reviewer role ID
 CONFIG_FILE = "bot_config.json"
 
 class BotConfig:
@@ -61,6 +57,62 @@ class BotConfig:
 
 config = BotConfig()
 
+# --- Review Search Dropdown View ---
+class ReviewSearchView(discord.ui.View):
+    def __init__(self, matching_reviews: list, db: Database, config):
+        super().__init__(timeout=60)
+        self.db = db
+        self.config = config
+        self.add_item(ReviewSelect(matching_reviews, db, config))
+
+class ReviewSelect(discord.ui.Select):
+    def __init__(self, matching_reviews: list, db: Database, config):
+        self.db = db
+        self.config = config
+        
+        options = []
+        for review in matching_reviews[:25]:  # Discord limits to 25 options
+            status = "✅" if review['verdict'] != 'Pending' else "⏳"
+            label = f"{review['player_name']} {review['rating']}"
+            if len(label) > 100:
+                label = label[:97] + "..."
+            
+            description = f"By: {review['reviewer_name']}"
+            if len(description) > 100:
+                description = description[:97] + "..."
+            
+            options.append(
+                discord.SelectOption(
+                    label=label,
+                    description=description,
+                    value=str(review['id']),
+                    emoji=status
+                )
+            )
+        
+        super().__init__(
+            placeholder="Select a review to view...",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
+    
+    async def callback(self, interaction: discord.Interaction):
+        review_id = int(self.values[0])
+        review = self.db.get_review(review_id)
+        
+        if not review:
+            await interaction.response.send_message(
+                "❌ Review not found! It may have been deleted.",
+                ephemeral=True
+            )
+            return
+        
+        embed = create_review_embed(review)
+        view = ReviewEditView(review_id, self.db, self.config)
+        
+        await interaction.response.edit_message(embed=embed, view=view)
+
 class FCMReviewBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
@@ -79,11 +131,9 @@ bot = FCMReviewBot()
 
 # === PERMISSION CHECK FUNCTIONS ===
 def is_allowed_reviewer(user_id: int) -> bool:
-    """Check if user is allowed to create reviews"""
     return user_id in ALLOWED_REVIEWERS
 
 async def has_reviewer_role(interaction: discord.Interaction) -> bool:
-    """Check if user has the reviewer role"""
     role_id = config.get_reviewer_role_id()
     if not role_id:
         return False
@@ -95,7 +145,6 @@ async def has_reviewer_role(interaction: discord.Interaction) -> bool:
     return role in interaction.user.roles
 
 def is_bot_owner(user_id: int) -> bool:
-    """Check if user is the bot owner"""
     return user_id == BOT_OWNER_ID
 
 # === BOT EVENTS ===
@@ -126,7 +175,6 @@ async def review_command(
     stats: str,
     image: discord.Attachment
 ):
-    # Check if user is allowed
     if not is_allowed_reviewer(interaction.user.id):
         await interaction.response.send_message(
             "❌ **Permission Denied**\nYou are not authorized to create reviews.",
@@ -151,10 +199,36 @@ async def review_command(
     
     await interaction.followup.send(embed=embed, view=view)
 
+@bot.tree.command(name="search", description="Search for a player review by name")
+@app_commands.describe(player_name="Name of the player to search for")
+async def search_command(interaction: discord.Interaction, player_name: str):
+    """Search reviews by player name and show a dropdown to select"""
+    reviews = bot.db.get_all_reviews()
+    
+    matching_reviews = [
+        r for r in reviews 
+        if player_name.lower() in r['player_name'].lower()
+    ]
+    
+    if not matching_reviews:
+        await interaction.response.send_message(
+            f"❌ No reviews found for **{player_name}**",
+            ephemeral=True
+        )
+        return
+    
+    embed = discord.Embed(
+        title=f"🔍 Search Results for '{player_name}'",
+        description=f"Found **{len(matching_reviews)}** matching review(s).\nSelect one from the dropdown below:",
+        color=discord.Color.blue()
+    )
+    
+    view = ReviewSearchView(matching_reviews, bot.db, config)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=False)
+
 @bot.tree.command(name="assign_reviewer_role", description="Set the role that can edit reviews (Bot Owner Only)")
 @app_commands.describe(role="The role to assign for editing reviews")
 async def assign_reviewer_role(interaction: discord.Interaction, role: discord.Role):
-    # Only bot owner can use this
     if not is_bot_owner(interaction.user.id):
         await interaction.response.send_message(
             "❌ **Permission Denied**\nOnly the bot owner can use this command.",
@@ -313,20 +387,6 @@ async def list_reviews(interaction: discord.Interaction):
     
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="get_review", description="Get a specific review by ID")
-@app_commands.describe(review_id="The ID of the review to fetch")
-async def get_review(interaction: discord.Interaction, review_id: int):
-    review = bot.db.get_review(review_id)
-    
-    if not review:
-        await interaction.response.send_message(f"Review #{review_id} not found!", ephemeral=True)
-        return
-    
-    embed = create_review_embed(review)
-    view = ReviewEditView(review_id, bot.db, config)
-    
-    await interaction.response.send_message(embed=embed, view=view)
-
 @bot.tree.command(name="backup", description="Create and download a backup of all reviews")
 @app_commands.default_permissions(administrator=True)
 async def backup_command(interaction: discord.Interaction):
@@ -398,7 +458,7 @@ async def stats_command(interaction: discord.Interaction):
     
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="help_review", description="Show help for the review system")
+@bot.tree.command(name="help", description="Show help for the review system")
 async def help_command(interaction: discord.Interaction):
     embed = discord.Embed(
         title="📚 FCM Review Bot Help",
@@ -407,26 +467,44 @@ async def help_command(interaction: discord.Interaction):
     )
     
     embed.add_field(
-        name="Creating a Review",
-        value="Use `/review` command (Restricted to approved reviewers)",
+        name="📝 `/review`",
+        value="Create a new player review (Restricted to approved reviewers)\nFormat: `PAC: 95, SHO: 88, PAS: 82`",
         inline=False
     )
     
     embed.add_field(
-        name="Editing Reviews",
-        value="Users with the assigned reviewer role can click the edit buttons",
+        name="🔍 `/search <player>`",
+        value="Search for a player review by name and select from dropdown",
         inline=False
     )
     
     embed.add_field(
-        name="Backup System",
-        value="Bot owner can use `/backup` and `/restore`",
+        name="📋 `/list_reviews`",
+        value="Show all reviews in the database",
         inline=False
     )
     
     embed.add_field(
-        name="Stats Format",
-        value="Use format: `PAC: 95, SHO: 88, PAS: 82, DRI: 91, DEF: 45, PHY: 78`",
+        name="✏️ Editing Reviews",
+        value="Users with the assigned reviewer role can click the edit buttons below any review",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="💾 `/backup`",
+        value="Download a backup of all reviews (Bot Owner only)",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="🔄 `/restore`",
+        value="Restore database from a backup file (Bot Owner only)",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="📊 `/stats`",
+        value="View bot statistics",
         inline=False
     )
     
@@ -434,7 +512,6 @@ async def help_command(interaction: discord.Interaction):
 
 # Run the bot with Flask in a separate thread
 if __name__ == "__main__":
-    # Start Flask server in a background thread
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
