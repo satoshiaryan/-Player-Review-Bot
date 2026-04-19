@@ -7,7 +7,21 @@ from dotenv import load_dotenv
 from database import Database
 from views import ReviewEditView, create_review_embed
 from utils import parse_stats_input
+import threading
+from flask import Flask
 
+# --- Flask Web Server (for Render health checks) ---
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "FCM Review Bot is Online!"
+
+def run_flask():
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
+
+# --- Discord Bot Setup ---
 load_dotenv()
 
 class FCMReviewBot(commands.Bot):
@@ -22,8 +36,6 @@ class FCMReviewBot(commands.Bot):
     async def setup_hook(self):
         await self.tree.sync()
         print(f"Synced commands for {self.user}")
-        
-        # Register persistent views
         self.add_view(ReviewEditView(0, self.db))
 
 bot = FCMReviewBot()
@@ -51,7 +63,6 @@ async def review_command(
 ):
     await interaction.response.defer()
     
-    # Create review in database
     review_id = bot.db.add_review(
         player_name=player_name,
         rating=rating,
@@ -61,10 +72,7 @@ async def review_command(
         reviewer_name=interaction.user.display_name
     )
     
-    # Get the created review
     review = bot.db.get_review(review_id)
-    
-    # Create embed and view
     embed = create_review_embed(review)
     view = ReviewEditView(review_id, bot.db)
     
@@ -84,7 +92,7 @@ async def list_reviews(interaction: discord.Interaction):
         description=f"Total: {len(reviews)} reviews"
     )
     
-    for review in reviews[:25]:  # Discord limit of 25 fields
+    for review in reviews[:25]:
         status = "✅" if review['verdict'] != 'Pending' else "⏳"
         embed.add_field(
             name=f"{status} {review['player_name']} {review['rating']}",
@@ -114,7 +122,6 @@ async def backup_command(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     
     backup_path = bot.db.create_backup()
-    
     file = discord.File(backup_path, filename=f"fcm_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db")
     
     await interaction.followup.send(
@@ -122,8 +129,6 @@ async def backup_command(interaction: discord.Interaction):
         file=file,
         ephemeral=True
     )
-    
-    # Clean up the temporary backup file
     os.remove(backup_path)
 
 @bot.tree.command(name="restore", description="Restore database from a backup file")
@@ -136,18 +141,13 @@ async def restore_command(interaction: discord.Interaction, backup_file: discord
     
     await interaction.response.defer(ephemeral=True)
     
-    # Save uploaded file temporarily
     temp_path = f"temp_restore_{datetime.now().timestamp()}.db"
     await backup_file.save(temp_path)
     
-    # Attempt restore
     success = bot.db.restore_backup(temp_path)
-    
-    # Clean up temp file
     os.remove(temp_path)
     
     if success:
-        # Reinitialize database connection
         bot.db = Database()
         await interaction.followup.send(
             f"✅ **Database Restored Successfully!**\nTotal Reviews: {bot.db.get_review_count()}",
@@ -205,12 +205,17 @@ async def help_command(interaction: discord.Interaction):
     
     await interaction.response.send_message(embed=embed)
 
-# Run the bot
+# Run the bot with Flask in a separate thread
 if __name__ == "__main__":
+    # Start Flask server in a background thread
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.daemon = True  # This ensures the thread closes when the bot stops
+    flask_thread.start()
+    
+    # Start Discord Bot (this blocks the main thread)
     token = os.getenv('DISCORD_TOKEN')
     if not token:
         print("❌ ERROR: No token found in .env file!")
-        print("Create a .env file with DISCORD_TOKEN=your_token_here")
         exit(1)
     
     bot.run(token)
