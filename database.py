@@ -114,35 +114,85 @@ class Database:
             return cursor.rowcount > 0
     
     def create_backup(self, backup_path: str = None) -> str:
-        """Create a backup of the database"""
+        """Create a backup of the database using SQLite's backup API"""
         if not backup_path:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_path = f"backup_{timestamp}.db"
         
-        shutil.copy2(self.db_path, backup_path)
-        
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT COUNT(*) FROM reviews')
-            count = cursor.fetchone()[0]
-            cursor.execute('''
-                INSERT INTO backups (review_count, file_path)
-                VALUES (?, ?)
-            ''', (count, backup_path))
-        
-        return backup_path
+        try:
+            # Use SQLite's built-in backup for safe copying
+            source = sqlite3.connect(self.db_path)
+            dest = sqlite3.connect(backup_path)
+            source.backup(dest)
+            dest.close()
+            source.close()
+            
+            # Log backup in the original database
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT COUNT(*) FROM reviews')
+                count = cursor.fetchone()[0]
+                cursor.execute('''
+                    INSERT INTO backups (review_count, file_path)
+                    VALUES (?, ?)
+                ''', (count, backup_path))
+            
+            print(f"✅ Backup created successfully: {backup_path} ({count} reviews)")
+            return backup_path
+            
+        except Exception as e:
+            print(f"❌ Backup failed: {e}")
+            # Fallback to shutil if sqlite backup fails
+            try:
+                shutil.copy2(self.db_path, backup_path)
+                print(f"✅ Backup created with shutil: {backup_path}")
+                return backup_path
+            except Exception as e2:
+                print(f"❌ Shutil backup also failed: {e2}")
+                raise
     
     def restore_backup(self, backup_path: str) -> bool:
         """Restore database from backup file"""
         if not os.path.exists(backup_path):
+            print(f"❌ Backup file not found: {backup_path}")
             return False
         
-        shutil.copy2(backup_path, self.db_path)
-        return True
+        try:
+            # Verify it's a valid SQLite database
+            test_conn = sqlite3.connect(backup_path)
+            test_conn.execute("SELECT COUNT(*) FROM reviews")
+            test_conn.close()
+            
+            # Use SQLite's backup API for restore
+            source = sqlite3.connect(backup_path)
+            dest = sqlite3.connect(self.db_path)
+            source.backup(dest)
+            dest.close()
+            source.close()
+            
+            # Verify restore worked
+            count = self.get_review_count()
+            print(f"✅ Database restored successfully! Total reviews: {count}")
+            return True
+            
+        except Exception as e:
+            print(f"❌ SQLite restore failed: {e}")
+            # Fallback to shutil
+            try:
+                shutil.copy2(backup_path, self.db_path)
+                count = self.get_review_count()
+                print(f"✅ Database restored with shutil! Total reviews: {count}")
+                return True
+            except Exception as e2:
+                print(f"❌ Shutil restore also failed: {e2}")
+                return False
     
     def get_review_count(self) -> int:
         """Get total number of reviews"""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT COUNT(*) FROM reviews')
-            return cursor.fetchone()[0]
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT COUNT(*) FROM reviews')
+                return cursor.fetchone()[0]
+        except:
+            return 0
