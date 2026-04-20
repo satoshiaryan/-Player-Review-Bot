@@ -11,7 +11,7 @@ class ReviewEditView(discord.ui.View):
     
     async def check_permission(self, interaction: discord.Interaction) -> bool:
         """Check if user has permission to edit"""
-        # Bot owner always has permission (REPLACE WITH YOUR ID)
+        # Bot owner always has permission
         if interaction.user.id == 1214456066687893506:
             return True
         
@@ -53,7 +53,7 @@ class ReviewEditView(discord.ui.View):
     async def edit_verdict(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not await self.check_permission(interaction):
             return await self.handle_no_permission(interaction)
-        modal = EditModal("verdict", self.review_id, self.db, self.config, "Enter your final verdict")
+        modal = EditModal("verdict", self.review_id, self.db, self.config, "Enter your final verdict (e.g., Meta, Worth it, Skip)")
         await interaction.response.send_modal(modal)
     
     @discord.ui.button(label="Edit Alternatives", style=discord.ButtonStyle.grey, custom_id="edit_alternatives", row=1)
@@ -112,29 +112,38 @@ class EditModal(discord.ui.Modal):
 
 def create_review_embed(review: dict) -> discord.Embed:
     """Create a formatted embed for a review"""
+    # Build title with player name, rating, and event
+    title = f"📋 {review['player_name']} {review['rating']}"
+    if review.get('event'):
+        title += f" - {review['event']}"
+    
     embed = discord.Embed(
-        title=f"📋 {review['player_name']} {review['rating']}",
+        title=title,
         color=discord.Color.gold(),
-        timestamp=datetime.fromisoformat(review['updated_at']) if review['updated_at'] else discord.utils.utcnow()
+        timestamp=datetime.fromisoformat(review['updated_at']) if review.get('updated_at') else discord.utils.utcnow()
     )
     
-    if review['base_stats']:
+    # Base Stats
+    if review.get('base_stats'):
         embed.add_field(name="📊 Base Stats", value=review['base_stats'], inline=False)
     
-    embed.add_field(name="✅ Pros", value=review['pros'] or "Not filled", inline=True)
-    embed.add_field(name="❌ Cons", value=review['cons'] or "Not filled", inline=True)
-    embed.add_field(name="\u200b", value="\u200b", inline=True)
+    # Review Content
+    embed.add_field(name="✅ Pros", value=review.get('pros') or "Not filled", inline=True)
+    embed.add_field(name="❌ Cons", value=review.get('cons') or "Not filled", inline=True)
+    embed.add_field(name="\u200b", value="\u200b", inline=True)  # Spacer
     
-    embed.add_field(name="⭐ Verdict", value=review['verdict'] or "Pending", inline=True)
-    embed.add_field(name="🔄 Alternatives", value=review['alternatives'] or "None", inline=True)
-    embed.add_field(name="\u200b", value="\u200b", inline=True)
+    embed.add_field(name="⭐ Verdict", value=review.get('verdict') or "Pending", inline=True)
+    embed.add_field(name="🔄 Alternatives", value=review.get('alternatives') or "None", inline=True)
+    embed.add_field(name="\u200b", value="\u200b", inline=True)  # Spacer
     
+    # Footer with reviewer info
     embed.set_footer(
-        text=f"Reviewed by {review['reviewer_name']} • ID: {review['id']}",
+        text=f"Reviewed by {review.get('reviewer_name', 'Unknown')} • ID: {review.get('id', 'N/A')}",
         icon_url="https://cdn.discordapp.com/embed/avatars/0.png"
     )
     
-    if review['image_url']:
+    # Set image if exists
+    if review.get('image_url'):
         embed.set_image(url=review['image_url'])
     
     return embed
