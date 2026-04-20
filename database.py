@@ -21,6 +21,7 @@ class Database:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     player_name TEXT NOT NULL,
                     rating TEXT,
+                    event TEXT DEFAULT "",
                     image_url TEXT,
                     base_stats TEXT,
                     pros TEXT DEFAULT 'Not filled',
@@ -34,6 +35,12 @@ class Database:
                 )
             ''')
             
+            # Check if event column exists, if not add it (for existing databases)
+            cursor.execute("PRAGMA table_info(reviews)")
+            columns = [col[1] for col in cursor.fetchall()]
+            if 'event' not in columns:
+                cursor.execute('ALTER TABLE reviews ADD COLUMN event TEXT DEFAULT ""')
+            
             # Backup history table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS backups (
@@ -45,20 +52,20 @@ class Database:
             ''')
     
     def add_review(self, player_name: str, rating: str, image_url: str, 
-                   base_stats: str, reviewer_id: str, reviewer_name: str) -> int:
+                   base_stats: str, reviewer_id: str, reviewer_name: str, event: str = "") -> int:
         """Add a new review and return its ID"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT INTO reviews 
-                (player_name, rating, image_url, base_stats, reviewer_id, reviewer_name)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (player_name, rating, image_url, base_stats, reviewer_id, reviewer_name))
+                (player_name, rating, event, image_url, base_stats, reviewer_id, reviewer_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (player_name, rating, event, image_url, base_stats, reviewer_id, reviewer_name))
             return cursor.lastrowid
     
     def update_review_field(self, review_id: int, field: str, value: str):
         """Update a specific field of a review"""
-        valid_fields = ['pros', 'cons', 'verdict', 'alternatives']
+        valid_fields = ['pros', 'cons', 'verdict', 'alternatives', 'event']
         if field not in valid_fields:
             raise ValueError(f"Invalid field: {field}")
         
