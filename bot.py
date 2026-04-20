@@ -6,7 +6,6 @@ from datetime import datetime
 from dotenv import load_dotenv
 from database import Database
 from views import ReviewEditView, create_review_embed
-from utils import parse_stats_input
 import threading
 from flask import Flask
 import json
@@ -29,8 +28,8 @@ load_dotenv()
 BOT_OWNER_ID = 1214456066687893506
 
 ALLOWED_REVIEWERS = [
-    553418145063239684,
-    1214456066687893506,
+    1214456066687893506,  # Bot Owner
+    553418145063239684,   # Other reviewer
 ]
 
 CONFIG_FILE = "bot_config.json"
@@ -73,8 +72,9 @@ class ReviewSelect(discord.ui.Select):
         
         options = []
         for review in matching_reviews[:25]:
-            status = "✅" if review['verdict'] != 'Pending' else "⏳"
-            label = f"{review['player_name']} {review['rating']}"
+            status = "✅" if review.get('verdict') != 'Pending' else "⏳"
+            event_text = f" [{review.get('event', '')}]" if review.get('event') else ""
+            label = f"{review['player_name']} {review['rating']}{event_text}"
             if len(label) > 100:
                 label = label[:97] + "..."
             
@@ -170,6 +170,7 @@ async def on_ready():
 @app_commands.describe(
     player_name="Name of the player (e.g., Kylian Mbappé)",
     rating="Overall rating (e.g., 97 OVR)",
+    event="Event/Promo name (e.g., TOTY, TOTS, UCL, Hero, Icon)",
     pace="PACE stat (e.g., 97)",
     shooting="SHOOTING stat (e.g., 94)",
     passing="PASSING stat (e.g., 88)",
@@ -182,6 +183,7 @@ async def review_command(
     interaction: discord.Interaction,
     player_name: str,
     rating: str,
+    event: str,
     pace: str,
     shooting: str,
     passing: str,
@@ -208,7 +210,8 @@ async def review_command(
         image_url=image.url,
         base_stats=stats_display,
         reviewer_id=str(interaction.user.id),
-        reviewer_name=interaction.user.display_name
+        reviewer_name=interaction.user.display_name,
+        event=event
     )
     
     review = bot.db.get_review(review_id)
@@ -395,9 +398,10 @@ async def list_reviews(interaction: discord.Interaction):
     )
     
     for review in reviews[:25]:
-        status = "✅" if review['verdict'] != 'Pending' else "⏳"
+        status = "✅" if review.get('verdict') != 'Pending' else "⏳"
+        event_text = f" [{review.get('event', '')}]" if review.get('event') else ""
         embed.add_field(
-            name=f"{status} {review['player_name']} {review['rating']}",
+            name=f"{status} {review['player_name']} {review['rating']}{event_text}",
             value=f"ID: `{review['id']}` | By: {review['reviewer_name']}",
             inline=False
         )
@@ -485,7 +489,7 @@ async def help_command(interaction: discord.Interaction):
     
     embed.add_field(
         name="📝 `/review`",
-        value="Create a new player review with individual stats:\n**PACE, SHOOTING, PASSING, DRIBBLING, DEFENDING, PHYSICAL**",
+        value="Create a new player review with:\n**Player Name, Rating, Event, PACE, SHOOTING, PASSING, DRIBBLING, DEFENDING, PHYSICAL, Image**",
         inline=False
     )
     
