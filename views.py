@@ -11,23 +11,60 @@ def get_star_display(rating: int) -> str:
     return f"{stars}{empty} ({rating}/5)"
 
 class ReviewEditView(discord.ui.View):
-    def __init__(self, review_id: int, database, config):
+    def __init__(self, review_id: int, database, config, interaction_user: discord.User = None):
         super().__init__(timeout=None)
         self.review_id = review_id
         self.db = database
         self.config = config
+        self.interaction_user = interaction_user
+        
+        # Show/hide buttons based on permission
+        self.update_button_visibility()
+    
+    def has_permission(self, user_id: int) -> bool:
+        """Check if user has permission to edit"""
+        # Bot owner always has permission
+        if user_id == 1214456066687893506:
+            return True
+        
+        # Check if user has reviewer role (need to fetch from config)
+        # We can't check roles here without guild context, so we'll do it in the button callback
+        
+        # Check if user is the original reviewer
+        review = self.db.get_review(self.review_id)
+        if review and str(user_id) == review.get('reviewer_id'):
+            return True
+        
+        return False
+    
+    def update_button_visibility(self):
+        """Update which buttons are visible based on user"""
+        if not self.interaction_user:
+            return
+        
+        has_perm = self.has_permission(self.interaction_user.id)
+        
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                if child.custom_id in ["edit_pros", "edit_cons", "edit_verdict", "edit_alternatives", "delete_review"]:
+                    # Hide edit/delete buttons for non-reviewers
+                    if not has_perm:
+                        self.remove_item(child)
     
     async def check_permission(self, interaction: discord.Interaction) -> bool:
-        """Check if user has permission to edit"""
+        """Full permission check with guild context"""
+        # Bot owner always has permission
         if interaction.user.id == 1214456066687893506:
             return True
         
+        # Check if user has reviewer role
         role_id = self.config.get_reviewer_role_id()
-        if role_id:
+        if role_id and interaction.guild:
             role = interaction.guild.get_role(role_id)
             if role and role in interaction.user.roles:
                 return True
         
+        # Check if user is the original reviewer
         review = self.db.get_review(self.review_id)
         if review and str(interaction.user.id) == review.get('reviewer_id'):
             return True
@@ -76,7 +113,9 @@ class ReviewEditView(discord.ui.View):
             return
         
         embed = create_review_embed(review)
-        await interaction.response.edit_message(embed=embed, view=self)
+        # Create new view with current user for proper button visibility
+        view = ReviewEditView(self.review_id, self.db, self.config, interaction.user)
+        await interaction.response.edit_message(embed=embed, view=view)
     
     @discord.ui.button(label="🗑️ Delete", style=discord.ButtonStyle.danger, custom_id="delete_review", row=2)
     async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -110,7 +149,7 @@ class EditModal(discord.ui.Modal):
         review = self.db.get_review(self.review_id)
         if review:
             embed = create_review_embed(review)
-            view = ReviewEditView(self.review_id, self.db, self.config)
+            view = ReviewEditView(self.review_id, self.db, self.config, interaction.user)
             await interaction.response.edit_message(embed=embed, view=view)
         else:
             await interaction.response.send_message("Error: Review not found!", ephemeral=True)
