@@ -177,7 +177,30 @@ async def on_ready():
     dribbling="DRIBBLING stat (e.g., 95)",
     defending="DEFENDING stat (e.g., 40)",
     physical="PHYSICAL stat (e.g., 78)",
+    skill_move="Skill Move stars (1-5)",
+    weak_foot="Weak Foot stars (1-5)",
+    strong_foot="Strong Foot (Left or Right)",
     image="Upload the player card image"
+)
+@app_commands.choices(
+    skill_move=[
+        app_commands.Choice(name="1 ★", value=1),
+        app_commands.Choice(name="2 ★★", value=2),
+        app_commands.Choice(name="3 ★★★", value=3),
+        app_commands.Choice(name="4 ★★★★", value=4),
+        app_commands.Choice(name="5 ★★★★★", value=5),
+    ],
+    weak_foot=[
+        app_commands.Choice(name="1 ★", value=1),
+        app_commands.Choice(name="2 ★★", value=2),
+        app_commands.Choice(name="3 ★★★", value=3),
+        app_commands.Choice(name="4 ★★★★", value=4),
+        app_commands.Choice(name="5 ★★★★★", value=5),
+    ],
+    strong_foot=[
+        app_commands.Choice(name="Left", value="Left"),
+        app_commands.Choice(name="Right", value="Right"),
+    ]
 )
 async def review_command(
     interaction: discord.Interaction,
@@ -190,6 +213,9 @@ async def review_command(
     dribbling: str,
     defending: str,
     physical: str,
+    skill_move: int,
+    weak_foot: int,
+    strong_foot: str,
     image: discord.Attachment
 ):
     if not is_allowed_reviewer(interaction.user.id):
@@ -211,7 +237,10 @@ async def review_command(
         base_stats=stats_display,
         reviewer_id=str(interaction.user.id),
         reviewer_name=interaction.user.display_name,
-        event=event
+        event=event,
+        skill_move=skill_move,
+        weak_foot=weak_foot,
+        strong_foot=strong_foot
     )
     
     review = bot.db.get_review(review_id)
@@ -489,7 +518,7 @@ async def help_command(interaction: discord.Interaction):
     
     embed.add_field(
         name="📝 `/review`",
-        value="Create a new player review with:\n**Player Name, Rating, Event, PACE, SHOOTING, PASSING, DRIBBLING, DEFENDING, PHYSICAL, Image**",
+        value="Create a new player review with:\n**Player Name, Rating, Event, PACE, SHOOTING, PASSING, DRIBBLING, DEFENDING, PHYSICAL, Skill Move, Weak Foot, Strong Foot, Image**",
         inline=False
     )
     
