@@ -2,6 +2,14 @@ import discord
 from typing import Optional
 from datetime import datetime
 
+def get_star_display(rating: int) -> str:
+    """Convert number to star display"""
+    if rating <= 0:
+        return "N/A"
+    stars = "★" * rating
+    empty = "☆" * (5 - rating)
+    return f"{stars}{empty} ({rating}/5)"
+
 class ReviewEditView(discord.ui.View):
     def __init__(self, review_id: int, database, config):
         super().__init__(timeout=None)
@@ -11,18 +19,15 @@ class ReviewEditView(discord.ui.View):
     
     async def check_permission(self, interaction: discord.Interaction) -> bool:
         """Check if user has permission to edit"""
-        # Bot owner always has permission
         if interaction.user.id == 1214456066687893506:
             return True
         
-        # Check if user has reviewer role
         role_id = self.config.get_reviewer_role_id()
         if role_id:
             role = interaction.guild.get_role(role_id)
             if role and role in interaction.user.roles:
                 return True
         
-        # Check if user is the original reviewer
         review = self.db.get_review(self.review_id)
         if review and str(interaction.user.id) == review.get('reviewer_id'):
             return True
@@ -53,7 +58,7 @@ class ReviewEditView(discord.ui.View):
     async def edit_verdict(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not await self.check_permission(interaction):
             return await self.handle_no_permission(interaction)
-        modal = EditModal("verdict", self.review_id, self.db, self.config, "Enter your final verdict (e.g., Meta, Worth it, Skip)")
+        modal = EditModal("verdict", self.review_id, self.db, self.config, "Enter your final verdict")
         await interaction.response.send_modal(modal)
     
     @discord.ui.button(label="Edit Alternatives", style=discord.ButtonStyle.grey, custom_id="edit_alternatives", row=1)
@@ -112,7 +117,7 @@ class EditModal(discord.ui.Modal):
 
 def create_review_embed(review: dict) -> discord.Embed:
     """Create a formatted embed for a review"""
-    # Build title with player name, rating, and event
+    # Build title
     title = f"📋 {review['player_name']} {review['rating']}"
     if review.get('event'):
         title += f" - {review['event']}"
@@ -123,6 +128,17 @@ def create_review_embed(review: dict) -> discord.Embed:
         timestamp=datetime.fromisoformat(review['updated_at']) if review.get('updated_at') else discord.utils.utcnow()
     )
     
+    # Player Info Section (Skill Move, Weak Foot, Strong Foot)
+    skill_move = review.get('skill_move', 0)
+    weak_foot = review.get('weak_foot', 0)
+    strong_foot = review.get('strong_foot', 'N/A')
+    
+    player_info = f"**Skill Move:** {get_star_display(skill_move)}\n"
+    player_info += f"**Weak Foot:** {get_star_display(weak_foot)}\n"
+    player_info += f"**Strong Foot:** {strong_foot}"
+    
+    embed.add_field(name="⚽ Player Info", value=player_info, inline=False)
+    
     # Base Stats
     if review.get('base_stats'):
         embed.add_field(name="📊 Base Stats", value=review['base_stats'], inline=False)
@@ -130,19 +146,19 @@ def create_review_embed(review: dict) -> discord.Embed:
     # Review Content
     embed.add_field(name="✅ Pros", value=review.get('pros') or "Not filled", inline=True)
     embed.add_field(name="❌ Cons", value=review.get('cons') or "Not filled", inline=True)
-    embed.add_field(name="\u200b", value="\u200b", inline=True)  # Spacer
+    embed.add_field(name="\u200b", value="\u200b", inline=True)
     
     embed.add_field(name="⭐ Verdict", value=review.get('verdict') or "Pending", inline=True)
     embed.add_field(name="🔄 Alternatives", value=review.get('alternatives') or "None", inline=True)
-    embed.add_field(name="\u200b", value="\u200b", inline=True)  # Spacer
+    embed.add_field(name="\u200b", value="\u200b", inline=True)
     
-    # Footer with reviewer info
+    # Footer
     embed.set_footer(
         text=f"Reviewed by {review.get('reviewer_name', 'Unknown')} • ID: {review.get('id', 'N/A')}",
         icon_url="https://cdn.discordapp.com/embed/avatars/0.png"
     )
     
-    # Set image if exists
+    # Set image
     if review.get('image_url'):
         embed.set_image(url=review['image_url'])
     
