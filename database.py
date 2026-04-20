@@ -24,6 +24,9 @@ class Database:
                     event TEXT DEFAULT "",
                     image_url TEXT,
                     base_stats TEXT,
+                    skill_move INTEGER DEFAULT 0,
+                    weak_foot INTEGER DEFAULT 0,
+                    strong_foot TEXT DEFAULT "",
                     pros TEXT DEFAULT 'Not filled',
                     cons TEXT DEFAULT 'Not filled',
                     verdict TEXT DEFAULT 'Pending',
@@ -35,11 +38,18 @@ class Database:
                 )
             ''')
             
-            # Check if event column exists, if not add it (for existing databases)
+            # Check and add missing columns (for existing databases)
             cursor.execute("PRAGMA table_info(reviews)")
             columns = [col[1] for col in cursor.fetchall()]
+            
             if 'event' not in columns:
                 cursor.execute('ALTER TABLE reviews ADD COLUMN event TEXT DEFAULT ""')
+            if 'skill_move' not in columns:
+                cursor.execute('ALTER TABLE reviews ADD COLUMN skill_move INTEGER DEFAULT 0')
+            if 'weak_foot' not in columns:
+                cursor.execute('ALTER TABLE reviews ADD COLUMN weak_foot INTEGER DEFAULT 0')
+            if 'strong_foot' not in columns:
+                cursor.execute('ALTER TABLE reviews ADD COLUMN strong_foot TEXT DEFAULT ""')
             
             # Backup history table
             cursor.execute('''
@@ -52,18 +62,20 @@ class Database:
             ''')
     
     def add_review(self, player_name: str, rating: str, image_url: str, 
-                   base_stats: str, reviewer_id: str, reviewer_name: str, event: str = "") -> int:
+                   base_stats: str, reviewer_id: str, reviewer_name: str, 
+                   event: str = "", skill_move: int = 0, weak_foot: int = 0, 
+                   strong_foot: str = "") -> int:
         """Add a new review and return its ID"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT INTO reviews 
-                (player_name, rating, event, image_url, base_stats, reviewer_id, reviewer_name)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (player_name, rating, event, image_url, base_stats, reviewer_id, reviewer_name))
+                (player_name, rating, event, image_url, base_stats, skill_move, weak_foot, strong_foot, reviewer_id, reviewer_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (player_name, rating, event, image_url, base_stats, skill_move, weak_foot, strong_foot, reviewer_id, reviewer_name))
             return cursor.lastrowid
     
-    def update_review_field(self, review_id: int, field: str, value: str):
+    def update_review_field(self, review_id: int, field: str, value):
         """Update a specific field of a review"""
         valid_fields = ['pros', 'cons', 'verdict', 'alternatives', 'event']
         if field not in valid_fields:
@@ -107,10 +119,8 @@ class Database:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_path = f"backup_{timestamp}.db"
         
-        # Create backup
         shutil.copy2(self.db_path, backup_path)
         
-        # Log backup
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT COUNT(*) FROM reviews')
@@ -127,7 +137,6 @@ class Database:
         if not os.path.exists(backup_path):
             return False
         
-        # Close current connection if open
         shutil.copy2(backup_path, self.db_path)
         return True
     
