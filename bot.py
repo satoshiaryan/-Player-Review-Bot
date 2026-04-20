@@ -110,7 +110,7 @@ class ReviewSelect(discord.ui.Select):
             return
         
         embed = create_review_embed(review)
-        view = ReviewEditView(review_id, self.db, self.config)
+        view = ReviewEditView(review_id, self.db, self.config, interaction.user)
         
         await interaction.response.edit_message(embed=embed, view=view)
 
@@ -126,7 +126,7 @@ class FCMReviewBot(commands.Bot):
     async def setup_hook(self):
         await self.tree.sync()
         print(f"Synced commands for {self.user}")
-        self.add_view(ReviewEditView(0, self.db, config))
+        self.add_view(ReviewEditView(0, self.db, config, None))
 
 bot = FCMReviewBot()
 
@@ -245,7 +245,7 @@ async def review_command(
     
     review = bot.db.get_review(review_id)
     embed = create_review_embed(review)
-    view = ReviewEditView(review_id, bot.db, config)
+    view = ReviewEditView(review_id, bot.db, config, interaction.user)
     
     await interaction.followup.send(embed=embed, view=view)
 
@@ -518,7 +518,7 @@ async def help_command(interaction: discord.Interaction):
     
     embed.add_field(
         name="📝 `/review`",
-        value="Create a new player review with:\n**Player Name, Rating, Event, PACE, SHOOTING, PASSING, DRIBBLING, DEFENDING, PHYSICAL, Skill Move, Weak Foot, Strong Foot, Image**",
+        value="Create a new player review with:\n**Player Name, Rating, Event, Stats, Skill Move, Weak Foot, Strong Foot, Image**",
         inline=False
     )
     
@@ -536,7 +536,7 @@ async def help_command(interaction: discord.Interaction):
     
     embed.add_field(
         name="✏️ Editing Reviews",
-        value="Users with the assigned reviewer role can click the edit buttons below any review",
+        value="Edit buttons are ONLY visible to: Bot Owner, users with Reviewer Role, and the original reviewer",
         inline=False
     )
     
