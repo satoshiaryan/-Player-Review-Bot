@@ -10,6 +10,13 @@ def get_star_display(rating: int) -> str:
     empty = "☆" * (5 - rating)
     return f"{stars}{empty} ({rating}/5)"
 
+def format_with_bullets(text: str) -> str:
+    """Convert multi-line text to bullet points"""
+    if not text or text in ["Not filled", "Pending", "None"]:
+        return text
+    lines = text.strip().split('\n')
+    return '\n'.join([f"• {line}" if not line.startswith('•') and not line.startswith('-') else line for line in lines])
+
 class ReviewEditView(discord.ui.View):
     def __init__(self, review_id: int, database, config, interaction_user: discord.User = None):
         super().__init__(timeout=None)
@@ -26,9 +33,6 @@ class ReviewEditView(discord.ui.View):
         # Bot owner always has permission
         if user_id == 1214456066687893506:
             return True
-        
-        # Check if user has reviewer role (need to fetch from config)
-        # We can't check roles here without guild context, so we'll do it in the button callback
         
         # Check if user is the original reviewer
         review = self.db.get_review(self.review_id)
@@ -102,7 +106,7 @@ class ReviewEditView(discord.ui.View):
     async def edit_alternatives(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not await self.check_permission(interaction):
             return await self.handle_no_permission(interaction)
-        modal = EditModal("alternatives", self.review_id, self.db, self.config, "Enter alternative players")
+        modal = EditModal("alternatives", self.review_id, self.db, self.config, "Enter alternative players (one per line)")
         await interaction.response.send_modal(modal)
     
     @discord.ui.button(label="🔄 Refresh", style=discord.ButtonStyle.secondary, custom_id="refresh_review", row=2)
@@ -113,7 +117,6 @@ class ReviewEditView(discord.ui.View):
             return
         
         embed = create_review_embed(review)
-        # Create new view with current user for proper button visibility
         view = ReviewEditView(self.review_id, self.db, self.config, interaction.user)
         await interaction.response.edit_message(embed=embed, view=view)
     
@@ -133,12 +136,19 @@ class EditModal(discord.ui.Modal):
         self.db = database
         self.config = config
         
+        # Get current value for pre-filling
+        review = self.db.get_review(self.review_id)
+        current_value = review.get(field, '') if review else ''
+        if current_value in ['Not filled', 'Pending', 'None']:
+            current_value = ''
+        
         self.text_input = discord.ui.TextInput(
             label=placeholder,
             style=discord.TextStyle.paragraph,
             required=False,
             max_length=1000,
-            placeholder=placeholder
+            placeholder=placeholder,
+            default=current_value
         )
         self.add_item(self.text_input)
     
@@ -182,14 +192,19 @@ def create_review_embed(review: dict) -> discord.Embed:
     if review.get('base_stats'):
         embed.add_field(name="📊 Base Stats", value=review['base_stats'], inline=False)
     
-    # Review Content
-    embed.add_field(name="✅ Pros", value=review.get('pros') or "Not filled", inline=True)
-    embed.add_field(name="❌ Cons", value=review.get('cons') or "Not filled", inline=True)
-    embed.add_field(name="\u200b", value="\u200b", inline=True)
+    # Review Content with bullets
+    pros = format_with_bullets(review.get('pros') or "Not filled")
+    cons = format_with_bullets(review.get('cons') or "Not filled")
+    verdict = format_with_bullets(review.get('verdict') or "Pending")
+    alternatives = format_with_bullets(review.get('alternatives') or "None")
     
-    embed.add_field(name="⭐ Verdict", value=review.get('verdict') or "Pending", inline=True)
-    embed.add_field(name="🔄 Alternatives", value=review.get('alternatives') or "None", inline=True)
-    embed.add_field(name="\u200b", value="\u200b", inline=True)
+    embed.add_field(name="✅ Pros", value=pros, inline=True)
+    embed.add_field(name="❌ Cons", value=cons, inline=True)
+    embed.add_field(name="\u200b", value="\u200b", inline=True)  # Spacer
+    
+    embed.add_field(name="⭐ Verdict", value=verdict, inline=True)
+    embed.add_field(name="🔄 Alternatives", value=alternatives, inline=True)
+    embed.add_field(name="\u200b", value="\u200b", inline=True)  # Spacer
     
     # Footer
     embed.set_footer(
