@@ -350,14 +350,36 @@ async def backup_command(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     
     files_to_send = []
+    backup_path = None
     
-    if os.path.exists('fcm_reviews.db'):
-        files_to_send.append(discord.File('fcm_reviews.db'))
+    # USE THE DATABASE'S BUILT-IN BACKUP METHOD
+    try:
+        backup_path = bot.db.create_backup()
+        if os.path.exists(backup_path) and os.path.getsize(backup_path) > 0:
+            files_to_send.append(discord.File(backup_path, filename="fcm_reviews.db"))
+            print(f"✅ Backup file created: {backup_path} ({os.path.getsize(backup_path)} bytes)")
+        else:
+            print(f"⚠️ Backup file empty or missing")
+    except Exception as e:
+        print(f"❌ Backup failed: {e}")
+        # Fallback: try direct file read
+        if os.path.exists('fcm_reviews.db'):
+            db_size = os.path.getsize('fcm_reviews.db')
+            if db_size > 0:
+                files_to_send.append(discord.File('fcm_reviews.db'))
+                print(f"⚠️ Using fallback direct file read: {db_size} bytes")
+    
+    # Add config file if exists
     if os.path.exists('bot_config.json'):
         files_to_send.append(discord.File('bot_config.json'))
     
     if not files_to_send:
-        await interaction.followup.send("❌ No database files found!", ephemeral=True)
+        await interaction.followup.send(
+            "❌ **Backup Failed**\nNo files could be backed up.\n\n"
+            "Try creating a review first, then backup again.\n"
+            "Use `/dbcheck` to diagnose database issues.",
+            ephemeral=True
+        )
         return
     
     embed = discord.Embed(
@@ -365,11 +387,22 @@ async def backup_command(interaction: discord.Interaction):
         description=f"**Time:** <t:{int(datetime.now().timestamp())}:F>\n**Reviews:** {bot.db.get_review_count()}",
         color=discord.Color.green()
     )
-    embed.add_field(name="Files", value="• fcm_reviews.db\n• bot_config.json", inline=False)
-    embed.add_field(name="💡 Restore", value="Use `/restore` and attach these files", inline=False)
+    
+    file_list = []
+    for f in files_to_send:
+        file_list.append(f"• {f.filename}")
+    embed.add_field(name="Files", value="\n".join(file_list), inline=False)
+    embed.add_field(name="💡 Restore", value="Use `/restore` and attach the .db file", inline=False)
     embed.set_footer(text="FCM Review Bot | Save these files!")
     
     await interaction.followup.send(embed=embed, files=files_to_send, ephemeral=True)
+    
+    # Clean up temp backup file
+    if backup_path and os.path.exists(backup_path):
+        try:
+            os.remove(backup_path)
+        except:
+            pass
 
 @bot.tree.command(name="restore", description="Restore database from backup files (Owner Only)")
 @app_commands.describe(
@@ -432,6 +465,39 @@ async def restore_command(
     
     await interaction.followup.send(embed=embed, ephemeral=True)
 
+@bot.tree.command(name="dbcheck", description="Check database status (Owner Only)")
+async def dbcheck_command(interaction: discord.Interaction):
+    if not is_bot_owner(interaction.user.id):
+        await interaction.response.send_message("❌ Owner only!", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    db_path = "fcm_reviews.db"
+    
+    embed = discord.Embed(title="🔍 Database Status", color=discord.Color.blue())
+    
+    embed.add_field(name="File Exists", value=str(os.path.exists(db_path)), inline=True)
+    
+    if os.path.exists(db_path):
+        size = os.path.getsize(db_path)
+        embed.add_field(name="File Size", value=f"{size} bytes ({size/1024:.2f} KB)", inline=True)
+    else:
+        embed.add_field(name="File Size", value="N/A", inline=True)
+    
+    embed.add_field(name="Review Count", value=str(bot.db.get_review_count()), inline=True)
+    embed.add_field(name="Working Directory", value=f"`{os.getcwd()}`", inline=False)
+    
+    # List all .db files
+    db_files = [f for f in os.listdir('.') if f.endswith('.db')]
+    embed.add_field(name="Database Files", value="\n".join(db_files) if db_files else "None", inline=False)
+    
+    # List other important files
+    other_files = [f for f in os.listdir('.') if f.endswith('.json')]
+    embed.add_field(name="Config Files", value="\n".join(other_files) if other_files else "None", inline=False)
+    
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
 @bot.tree.command(name="stats", description="Show bot statistics")
 async def stats_command(interaction: discord.Interaction):
     review_count = bot.db.get_review_count()
@@ -490,6 +556,12 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(
         name="🔄 `/restore`",
         value="Restore from backup files (Owner only)",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="🔍 `/dbcheck`",
+        value="Check database status (Owner only)",
         inline=False
     )
     
