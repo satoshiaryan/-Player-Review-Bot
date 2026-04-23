@@ -311,7 +311,39 @@ async def assign_reviewer_role(interaction: discord.Interaction, role: discord.R
         description=f"Users with the **{role.name}** role can now edit reviews.",
         color=discord.Color.green()
     )
+    embed.set_footer(text=f"Role ID: {role.id}")
     await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="check_reviewer_role", description="Check the current reviewer role (Bot Owner Only)")
+async def check_reviewer_role(interaction: discord.Interaction):
+    if not is_bot_owner(interaction.user.id):
+        await interaction.response.send_message(
+            "❌ **Permission Denied**\nOnly the bot owner can use this command.",
+            ephemeral=True
+        )
+        return
+    
+    role_id = config.get_reviewer_role_id()
+    if role_id:
+        role = interaction.guild.get_role(role_id)
+        if role:
+            embed = discord.Embed(
+                title="🎭 Current Reviewer Role",
+                description=f"**Role:** {role.mention}\n**Name:** {role.name}\n**ID:** `{role.id}`",
+                color=discord.Color.blue()
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        else:
+            await interaction.response.send_message(
+                f"⚠️ Reviewer role ID `{role_id}` is saved but the role no longer exists in this server!\n"
+                "It may have been deleted. Use `/assign_reviewer_role` to set a new one.",
+                ephemeral=True
+            )
+    else:
+        await interaction.response.send_message(
+            "❌ No reviewer role has been set yet.\nUse `/assign_reviewer_role @Role` to set one.",
+            ephemeral=True
+        )
 
 @bot.tree.command(name="list_reviews", description="List all reviews in the database")
 async def list_reviews(interaction: discord.Interaction):
@@ -544,6 +576,12 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(
         name="✏️ Editing Reviews",
         value="Edit buttons visible to: Owner, Reviewer Role, Original Reviewer",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="🎭 Role Management",
+        value="`/assign_reviewer_role @Role` - Set edit role\n`/check_reviewer_role` - Check current role (Owner only)",
         inline=False
     )
     
