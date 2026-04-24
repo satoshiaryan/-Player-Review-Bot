@@ -154,7 +154,6 @@ class FCMReviewBot(commands.Bot):
     async def setup_hook(self):
         await self.tree.sync()
         print(f"Synced commands for {self.user}")
-        # No persistent view registration - views are attached per-message
 
 bot = FCMReviewBot()
 
@@ -200,6 +199,7 @@ async def on_ready():
     skill_move="Skill Move stars (1-5)",
     weak_foot="Weak Foot stars (1-5)",
     strong_foot="Strong Foot (Left or Right)",
+    skill_points="Skill Points (e.g., 2X Attacking Midfielder, 2X Playmaker, 1X Dribbling)",
     image="Upload the player card image"
 )
 @app_commands.choices(
@@ -236,6 +236,7 @@ async def review_command(
     skill_move: int,
     weak_foot: int,
     strong_foot: str,
+    skill_points: str,
     image: discord.Attachment
 ):
     if not is_allowed_reviewer(interaction.user.id):
@@ -260,7 +261,7 @@ async def review_command(
         skill_move=skill_move,
         weak_foot=weak_foot,
         strong_foot=strong_foot,
-        skill_points=""
+        skill_points=skill_points
     )
     
     review = bot.db.get_review(review_id)
@@ -552,7 +553,7 @@ async def help_command(interaction: discord.Interaction):
     
     embed.add_field(
         name="📝 `/review`",
-        value="Create a new player review with all stats",
+        value="Create a new player review with all stats, skill points, and card image",
         inline=False
     )
     
@@ -572,7 +573,6 @@ async def help_command(interaction: discord.Interaction):
         name="✏️ Editing Reviews",
         value="Edit buttons visible to: Owner, Reviewer Role, Original Reviewer\n\n"
               "**Buttons:**\n"
-              "• 🎯 Edit Skill Points\n"
               "• ✅ Edit Pros\n"
               "• ❌ Edit Cons\n"
               "• ⭐ Edit Verdict\n"
