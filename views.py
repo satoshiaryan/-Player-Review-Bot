@@ -45,7 +45,7 @@ class ReviewEditView(discord.ui.View):
         
         for child in self.children:
             if isinstance(child, discord.ui.Button):
-                if child.custom_id in ["edit_pros", "edit_cons", "edit_verdict", "edit_alternatives", "edit_skill_points", "delete_review"]:
+                if child.custom_id in ["edit_pros", "edit_cons", "edit_verdict", "edit_alternatives", "delete_review"]:
                     if not has_perm:
                         self.remove_item(child)
     
@@ -71,21 +71,14 @@ class ReviewEditView(discord.ui.View):
             ephemeral=True
         )
     
-    @discord.ui.button(label="Edit Skill Points", style=discord.ButtonStyle.primary, custom_id="edit_skill_points", row=0)
-    async def edit_skill_points(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not await self.check_permission(interaction):
-            return await self.handle_no_permission(interaction)
-        modal = EditModal("skill_points", self.review_id, self.db, self.config, "Enter skill points (e.g., 2X Attacking Midfielder, 2X Playmaker, 1X Dribbling)")
-        await interaction.response.send_modal(modal)
-    
-    @discord.ui.button(label="Edit Pros", style=discord.ButtonStyle.green, custom_id="edit_pros", row=1)
+    @discord.ui.button(label="Edit Pros", style=discord.ButtonStyle.green, custom_id="edit_pros", row=0)
     async def edit_pros(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not await self.check_permission(interaction):
             return await self.handle_no_permission(interaction)
         modal = EditModal("pros", self.review_id, self.db, self.config, "Enter the pros (one per line)")
         await interaction.response.send_modal(modal)
     
-    @discord.ui.button(label="Edit Cons", style=discord.ButtonStyle.red, custom_id="edit_cons", row=1)
+    @discord.ui.button(label="Edit Cons", style=discord.ButtonStyle.red, custom_id="edit_cons", row=0)
     async def edit_cons(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not await self.check_permission(interaction):
             return await self.handle_no_permission(interaction)
@@ -187,7 +180,7 @@ def create_review_embed(review: dict) -> discord.Embed:
     if review.get('base_stats'):
         embed.add_field(name="📊 Base Stats", value=review['base_stats'], inline=False)
     
-    # Skill Points (NEW)
+    # Skill Points
     skill_points = review.get('skill_points', '')
     if skill_points and skill_points not in ['Not filled', '', 'No skill_points provided']:
         embed.add_field(name="🎯 Skill Points", value=format_with_bullets(skill_points), inline=False)
