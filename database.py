@@ -27,6 +27,7 @@ class Database:
                     skill_move INTEGER DEFAULT 0,
                     weak_foot INTEGER DEFAULT 0,
                     strong_foot TEXT DEFAULT "",
+                    skill_points TEXT DEFAULT "",
                     pros TEXT DEFAULT 'Not filled',
                     cons TEXT DEFAULT 'Not filled',
                     verdict TEXT DEFAULT 'Pending',
@@ -50,6 +51,8 @@ class Database:
                 cursor.execute('ALTER TABLE reviews ADD COLUMN weak_foot INTEGER DEFAULT 0')
             if 'strong_foot' not in columns:
                 cursor.execute('ALTER TABLE reviews ADD COLUMN strong_foot TEXT DEFAULT ""')
+            if 'skill_points' not in columns:
+                cursor.execute('ALTER TABLE reviews ADD COLUMN skill_points TEXT DEFAULT ""')
             
             # Backup history table
             cursor.execute('''
@@ -64,20 +67,20 @@ class Database:
     def add_review(self, player_name: str, rating: str, image_url: str, 
                    base_stats: str, reviewer_id: str, reviewer_name: str, 
                    event: str = "", skill_move: int = 0, weak_foot: int = 0, 
-                   strong_foot: str = "") -> int:
+                   strong_foot: str = "", skill_points: str = "") -> int:
         """Add a new review and return its ID"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT INTO reviews 
-                (player_name, rating, event, image_url, base_stats, skill_move, weak_foot, strong_foot, reviewer_id, reviewer_name)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (player_name, rating, event, image_url, base_stats, skill_move, weak_foot, strong_foot, reviewer_id, reviewer_name))
+                (player_name, rating, event, image_url, base_stats, skill_move, weak_foot, strong_foot, skill_points, reviewer_id, reviewer_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (player_name, rating, event, image_url, base_stats, skill_move, weak_foot, strong_foot, skill_points, reviewer_id, reviewer_name))
             return cursor.lastrowid
     
     def update_review_field(self, review_id: int, field: str, value):
         """Update a specific field of a review"""
-        valid_fields = ['pros', 'cons', 'verdict', 'alternatives', 'event']
+        valid_fields = ['pros', 'cons', 'verdict', 'alternatives', 'event', 'skill_points']
         if field not in valid_fields:
             raise ValueError(f"Invalid field: {field}")
         
@@ -120,14 +123,12 @@ class Database:
             backup_path = f"backup_{timestamp}.db"
         
         try:
-            # Use SQLite's built-in backup for safe copying
             source = sqlite3.connect(self.db_path)
             dest = sqlite3.connect(backup_path)
             source.backup(dest)
             dest.close()
             source.close()
             
-            # Log backup in the original database
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute('SELECT COUNT(*) FROM reviews')
@@ -142,7 +143,6 @@ class Database:
             
         except Exception as e:
             print(f"❌ Backup failed: {e}")
-            # Fallback to shutil if sqlite backup fails
             try:
                 shutil.copy2(self.db_path, backup_path)
                 print(f"✅ Backup created with shutil: {backup_path}")
@@ -158,26 +158,22 @@ class Database:
             return False
         
         try:
-            # Verify it's a valid SQLite database
             test_conn = sqlite3.connect(backup_path)
             test_conn.execute("SELECT COUNT(*) FROM reviews")
             test_conn.close()
             
-            # Use SQLite's backup API for restore
             source = sqlite3.connect(backup_path)
             dest = sqlite3.connect(self.db_path)
             source.backup(dest)
             dest.close()
             source.close()
             
-            # Verify restore worked
             count = self.get_review_count()
             print(f"✅ Database restored successfully! Total reviews: {count}")
             return True
             
         except Exception as e:
             print(f"❌ SQLite restore failed: {e}")
-            # Fallback to shutil
             try:
                 shutil.copy2(backup_path, self.db_path)
                 count = self.get_review_count()
