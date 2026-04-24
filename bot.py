@@ -37,7 +37,7 @@ async def self_ping():
         return
     
     while not bot.is_closed():
-        await asyncio.sleep(840)  # 14 minutes
+        await asyncio.sleep(840)
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(RENDER_URL) as response:
@@ -154,7 +154,7 @@ class FCMReviewBot(commands.Bot):
     async def setup_hook(self):
         await self.tree.sync()
         print(f"Synced commands for {self.user}")
-        self.add_view(ReviewEditView(0, self.db, config, None))
+        # No persistent view registration - views are attached per-message
 
 bot = FCMReviewBot()
 
@@ -182,7 +182,6 @@ async def on_ready():
     print(f'🔄 Self-ping system: Active (every 14 minutes)')
     print('------')
     
-    # Start self-ping task
     bot.loop.create_task(self_ping())
 
 # === SLASH COMMANDS ===
