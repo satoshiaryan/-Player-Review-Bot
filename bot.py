@@ -58,9 +58,6 @@ ALLOWED_REVIEWERS = [
     1214456066687893506,  # Bot Owner
     553418145063239684,   # Other reviewer
     1202544947161468969,
-    1284912012102598767,
-    773492040339292190,
-    1479410597387960371,
 ]
 
 CONFIG_FILE = "bot_config.json"
@@ -167,10 +164,6 @@ def is_allowed_reviewer(user_id: int) -> bool:
 def is_bot_owner(user_id: int) -> bool:
     return user_id == BOT_OWNER_ID
 
-def format_stats(pace: str, shooting: str, passing: str, dribbling: str, defending: str, physical: str) -> str:
-    """Format the stats into a clean display string"""
-    return f"**PAC:** {pace} | **SHO:** {shooting} | **PAS:** {passing}\n**DRI:** {dribbling} | **DEF:** {defending} | **PHY:** {physical}"
-
 # === BOT EVENTS ===
 @bot.event
 async def on_ready():
@@ -186,9 +179,10 @@ async def on_ready():
     
     bot.loop.create_task(self_ping())
 
-# === SLASH COMMANDS ===
-
-@bot.tree.command(name="review", description="Start a new player review (Restricted)")
+# =============================================
+# === OUTFIELD PLAYER REVIEW COMMAND ===
+# =============================================
+@bot.tree.command(name="review_outfield", description="Create a review for an outfield player (Restricted)")
 @app_commands.describe(
     player_name="Name of the player (e.g., Kylian Mbappé)",
     rating="Overall rating (e.g., 97 OVR)",
@@ -225,7 +219,7 @@ async def on_ready():
         app_commands.Choice(name="Right", value="Right"),
     ]
 )
-async def review_command(
+async def review_outfield(
     interaction: discord.Interaction,
     player_name: str,
     rating: str,
@@ -239,8 +233,8 @@ async def review_command(
     skill_move: int,
     weak_foot: int,
     strong_foot: str,
-    skill_points: str,
-    image: discord.Attachment
+    skill_points: str = "",
+    image: discord.Attachment = None
 ):
     if not is_allowed_reviewer(interaction.user.id):
         await interaction.response.send_message(
@@ -251,12 +245,13 @@ async def review_command(
     
     await interaction.response.defer()
     
-    stats_display = format_stats(pace, shooting, passing, dribbling, defending, physical)
+    stats_display = f"**PAC:** {pace} | **SHO:** {shooting} | **PAS:** {passing}\n**DRI:** {dribbling} | **DEF:** {defending} | **PHY:** {physical}"
+    image_url = image.url if image else None
     
     review_id = bot.db.add_review(
         player_name=player_name,
         rating=rating,
-        image_url=image.url,
+        image_url=image_url,
         base_stats=stats_display,
         reviewer_id=str(interaction.user.id),
         reviewer_name=interaction.user.display_name,
@@ -272,6 +267,99 @@ async def review_command(
     view = ReviewEditView(review_id, bot.db, config, interaction.user)
     
     await interaction.followup.send(embed=embed, view=view)
+
+# =============================================
+# === GOALKEEPER REVIEW COMMAND ===
+# =============================================
+@bot.tree.command(name="review_gk", description="Create a review for a goalkeeper (Restricted)")
+@app_commands.describe(
+    player_name="Name of the goalkeeper (e.g., Thibaut Courtois)",
+    rating="Overall rating (e.g., 96 OVR)",
+    event="Event/Promo name (e.g., TOTY, TOTS, UCL, Hero, Icon)",
+    diving="DIVING stat (e.g., 95)",
+    positioning="POSITIONING stat (e.g., 92)",
+    handling="HANDLING stat (e.g., 90)",
+    reflexes="REFLEXES stat (e.g., 93)",
+    kicking="KICKING stat (e.g., 85)",
+    physical="PHYSICAL stat (e.g., 88)",
+    skill_move="Skill Move stars (1-5)",
+    weak_foot="Weak Foot stars (1-5)",
+    strong_foot="Strong Foot (Left or Right)",
+    skill_points="Skill Points (e.g., 2X Diving, 2X Reflexes, 1X Handling)",
+    image="Upload the player card image"
+)
+@app_commands.choices(
+    skill_move=[
+        app_commands.Choice(name="1 ★", value=1),
+        app_commands.Choice(name="2 ★★", value=2),
+        app_commands.Choice(name="3 ★★★", value=3),
+        app_commands.Choice(name="4 ★★★★", value=4),
+        app_commands.Choice(name="5 ★★★★★", value=5),
+    ],
+    weak_foot=[
+        app_commands.Choice(name="1 ★", value=1),
+        app_commands.Choice(name="2 ★★", value=2),
+        app_commands.Choice(name="3 ★★★", value=3),
+        app_commands.Choice(name="4 ★★★★", value=4),
+        app_commands.Choice(name="5 ★★★★★", value=5),
+    ],
+    strong_foot=[
+        app_commands.Choice(name="Left", value="Left"),
+        app_commands.Choice(name="Right", value="Right"),
+    ]
+)
+async def review_gk(
+    interaction: discord.Interaction,
+    player_name: str,
+    rating: str,
+    event: str,
+    diving: str,
+    positioning: str,
+    handling: str,
+    reflexes: str,
+    kicking: str,
+    physical: str,
+    skill_move: int,
+    weak_foot: int,
+    strong_foot: str,
+    skill_points: str = "",
+    image: discord.Attachment = None
+):
+    if not is_allowed_reviewer(interaction.user.id):
+        await interaction.response.send_message(
+            "❌ **Permission Denied**\nYou are not authorized to create reviews.",
+            ephemeral=True
+        )
+        return
+    
+    await interaction.response.defer()
+    
+    stats_display = f"**DIV:** {diving} | **POS:** {positioning} | **HAN:** {handling}\n**REF:** {reflexes} | **KIC:** {kicking} | **PHY:** {physical}"
+    image_url = image.url if image else None
+    
+    review_id = bot.db.add_review(
+        player_name=player_name,
+        rating=rating,
+        image_url=image_url,
+        base_stats=stats_display,
+        reviewer_id=str(interaction.user.id),
+        reviewer_name=interaction.user.display_name,
+        event=event,
+        skill_move=skill_move,
+        weak_foot=weak_foot,
+        strong_foot=strong_foot,
+        skill_points=skill_points
+    )
+    
+    review = bot.db.get_review(review_id)
+    embed = create_review_embed(review)
+    view = ReviewEditView(review_id, bot.db, config, interaction.user)
+    
+    await interaction.followup.send(embed=embed, view=view)
+
+# =============================================
+# === OTHER COMMANDS ===
+# =============================================
 
 @bot.tree.command(name="search", description="Search for a player review by name")
 @app_commands.describe(player_name="Name of the player to search for")
@@ -549,14 +637,22 @@ async def stats_command(interaction: discord.Interaction):
 @bot.tree.command(name="help", description="Show help for the review system")
 async def help_command(interaction: discord.Interaction):
     embed = discord.Embed(
-        title="📚 FCM Review Bot Help",
+        title="📚 FCM Review Bot Help - FELIX PR",
         description="Complete guide to using the review system",
         color=discord.Color.blurple()
     )
     
     embed.add_field(
-        name="📝 `/review`",
-        value="Create a new player review with all stats, skill points, and card image",
+        name="⚽ `/review_outfield`",
+        value="Create a review for outfield players\n"
+              "**Stats:** PAC, SHO, PAS, DRI, DEF, PHY",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="🧤 `/review_gk`",
+        value="Create a review for goalkeepers\n"
+              "**Stats:** DIV, POS, HAN, REF, KIC, PHY",
         inline=False
     )
     
@@ -598,12 +694,6 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(
         name="🔄 `/restore`",
         value="Restore from backup files (Owner only)",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="🔍 `/dbcheck`",
-        value="Check database status (Owner only)",
         inline=False
     )
     
