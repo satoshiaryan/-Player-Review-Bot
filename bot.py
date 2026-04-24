@@ -57,7 +57,6 @@ BOT_OWNER_ID = 1214456066687893506
 ALLOWED_REVIEWERS = [
     1214456066687893506,  # Bot Owner
     553418145063239684,   # Other reviewer
-    1202544947161468969,
 ]
 
 CONFIG_FILE = "bot_config.json"
@@ -260,7 +259,8 @@ async def review_command(
         event=event,
         skill_move=skill_move,
         weak_foot=weak_foot,
-        strong_foot=strong_foot
+        strong_foot=strong_foot,
+        skill_points=""
     )
     
     review = bot.db.get_review(review_id)
@@ -385,7 +385,6 @@ async def backup_command(interaction: discord.Interaction):
     files_to_send = []
     backup_path = None
     
-    # USE THE DATABASE'S BUILT-IN BACKUP METHOD
     try:
         backup_path = bot.db.create_backup()
         if os.path.exists(backup_path) and os.path.getsize(backup_path) > 0:
@@ -395,14 +394,12 @@ async def backup_command(interaction: discord.Interaction):
             print(f"⚠️ Backup file empty or missing")
     except Exception as e:
         print(f"❌ Backup failed: {e}")
-        # Fallback: try direct file read
         if os.path.exists('fcm_reviews.db'):
             db_size = os.path.getsize('fcm_reviews.db')
             if db_size > 0:
                 files_to_send.append(discord.File('fcm_reviews.db'))
                 print(f"⚠️ Using fallback direct file read: {db_size} bytes")
     
-    # Add config file if exists
     if os.path.exists('bot_config.json'):
         files_to_send.append(discord.File('bot_config.json'))
     
@@ -430,7 +427,6 @@ async def backup_command(interaction: discord.Interaction):
     
     await interaction.followup.send(embed=embed, files=files_to_send, ephemeral=True)
     
-    # Clean up temp backup file
     if backup_path and os.path.exists(backup_path):
         try:
             os.remove(backup_path)
@@ -521,11 +517,9 @@ async def dbcheck_command(interaction: discord.Interaction):
     embed.add_field(name="Review Count", value=str(bot.db.get_review_count()), inline=True)
     embed.add_field(name="Working Directory", value=f"`{os.getcwd()}`", inline=False)
     
-    # List all .db files
     db_files = [f for f in os.listdir('.') if f.endswith('.db')]
     embed.add_field(name="Database Files", value="\n".join(db_files) if db_files else "None", inline=False)
     
-    # List other important files
     other_files = [f for f in os.listdir('.') if f.endswith('.json')]
     embed.add_field(name="Config Files", value="\n".join(other_files) if other_files else "None", inline=False)
     
@@ -576,7 +570,13 @@ async def help_command(interaction: discord.Interaction):
     
     embed.add_field(
         name="✏️ Editing Reviews",
-        value="Edit buttons visible to: Owner, Reviewer Role, Original Reviewer",
+        value="Edit buttons visible to: Owner, Reviewer Role, Original Reviewer\n\n"
+              "**Buttons:**\n"
+              "• 🎯 Edit Skill Points\n"
+              "• ✅ Edit Pros\n"
+              "• ❌ Edit Cons\n"
+              "• ⭐ Edit Verdict\n"
+              "• 🔄 Edit Alternatives",
         inline=False
     )
     
