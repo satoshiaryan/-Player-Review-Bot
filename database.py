@@ -2,6 +2,9 @@ import sqlite3
 import json
 import shutil
 import os
+import io
+import base64
+import urllib.request
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
@@ -23,6 +26,7 @@ class Database:
                     rating TEXT,
                     event TEXT DEFAULT "",
                     image_url TEXT,
+                    image_data TEXT DEFAULT NULL,
                     base_stats TEXT,
                     skill_move INTEGER DEFAULT 0,
                     weak_foot INTEGER DEFAULT 0,
@@ -53,6 +57,8 @@ class Database:
                 cursor.execute('ALTER TABLE reviews ADD COLUMN strong_foot TEXT DEFAULT ""')
             if 'skill_points' not in columns:
                 cursor.execute('ALTER TABLE reviews ADD COLUMN skill_points TEXT DEFAULT ""')
+            if 'image_data' not in columns:
+                cursor.execute('ALTER TABLE reviews ADD COLUMN image_data TEXT DEFAULT NULL')
             
             # Backup history table
             cursor.execute('''
@@ -69,13 +75,26 @@ class Database:
                    event: str = "", skill_move: int = 0, weak_foot: int = 0, 
                    strong_foot: str = "", skill_points: str = "") -> int:
         """Add a new review and return its ID"""
+        
+        # Download image and convert to base64 for permanent storage
+        image_base64 = None
+        if image_url:
+            try:
+                req = urllib.request.Request(image_url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    image_data = response.read()
+                    image_base64 = base64.b64encode(image_data).decode('utf-8')
+                    print(f"✅ Downloaded & stored image: {len(image_data)} bytes")
+            except Exception as e:
+                print(f"⚠️ Could not download image: {e}")
+        
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT INTO reviews 
-                (player_name, rating, event, image_url, base_stats, skill_move, weak_foot, strong_foot, skill_points, reviewer_id, reviewer_name)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (player_name, rating, event, image_url, base_stats, skill_move, weak_foot, strong_foot, skill_points, reviewer_id, reviewer_name))
+                (player_name, rating, event, image_url, image_data, base_stats, skill_move, weak_foot, strong_foot, skill_points, reviewer_id, reviewer_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (player_name, rating, event, image_url, image_base64, base_stats, skill_move, weak_foot, strong_foot, skill_points, reviewer_id, reviewer_name))
             return cursor.lastrowid
     
     def update_review_field(self, review_id: int, field: str, value):
