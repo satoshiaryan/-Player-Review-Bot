@@ -140,10 +140,13 @@ class ReviewSelect(discord.ui.Select):
             )
             return
         
-        embed = create_review_embed(review)
+        embed, file = create_review_embed(review)
         view = ReviewEditView(review_id, self.db, self.config, interaction.user)
         
-        await interaction.response.edit_message(embed=embed, view=view)
+        if file:
+            await interaction.response.edit_message(embed=embed, attachments=[file], view=view)
+        else:
+            await interaction.response.edit_message(embed=embed, view=view)
 
 class FCMReviewBot(commands.Bot):
     def __init__(self):
@@ -266,10 +269,13 @@ async def review_outfield(
     )
     
     review = bot.db.get_review(review_id)
-    embed = create_review_embed(review)
+    embed, file = create_review_embed(review)
     view = ReviewEditView(review_id, bot.db, config, interaction.user)
     
-    await interaction.followup.send(embed=embed, view=view)
+    if file:
+        await interaction.followup.send(embed=embed, file=file, view=view)
+    else:
+        await interaction.followup.send(embed=embed, view=view)
 
 # =============================================
 # === GOALKEEPER REVIEW COMMAND ===
@@ -355,10 +361,75 @@ async def review_gk(
     )
     
     review = bot.db.get_review(review_id)
-    embed = create_review_embed(review)
+    embed, file = create_review_embed(review)
     view = ReviewEditView(review_id, bot.db, config, interaction.user)
     
-    await interaction.followup.send(embed=embed, view=view)
+    if file:
+        await interaction.followup.send(embed=embed, file=file, view=view)
+    else:
+        await interaction.followup.send(embed=embed, view=view)
+
+# =============================================
+# === UPDATE IMAGE COMMAND ===
+# =============================================
+@bot.tree.command(name="update_image", description="Update the card image for an existing review (Owner Only)")
+@app_commands.describe(
+    review_id="The ID of the review to update",
+    image="Upload the new player card image"
+)
+async def update_image(
+    interaction: discord.Interaction,
+    review_id: int,
+    image: discord.Attachment
+):
+    if not is_bot_owner(interaction.user.id):
+        await interaction.response.send_message(
+            "❌ **Permission Denied**\nOnly the bot owner can use this command.",
+            ephemeral=True
+        )
+        return
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    # Check if review exists
+    review = bot.db.get_review(review_id)
+    if not review:
+        await interaction.followup.send(f"❌ Review `{review_id}` not found!", ephemeral=True)
+        return
+    
+    # Download and store the new image
+    import base64
+    import urllib.request
+    
+    image_base64 = None
+    try:
+        req = urllib.request.Request(image.url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=10) as response:
+            image_data = response.read()
+            image_base64 = base64.b64encode(image_data).decode('utf-8')
+            print(f"✅ Downloaded new image for review {review_id}: {len(image_data)} bytes")
+    except Exception as e:
+        await interaction.followup.send(f"❌ Failed to download image: {e}", ephemeral=True)
+        return
+    
+    # Update the database
+    with __import__('sqlite3').connect(bot.db.db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE reviews 
+            SET image_url = ?, image_data = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ''', (image.url, image_base64, review_id))
+        conn.commit()
+    
+    embed = discord.Embed(
+        title="✅ Image Updated!",
+        description=f"Card image for review `{review_id}` (**{review['player_name']} {review['rating']}**) has been updated and stored permanently.",
+        color=discord.Color.green()
+    )
+    embed.set_footer(text="The image will no longer expire!")
+    
+    await interaction.followup.send(embed=embed, ephemeral=True)
 
 # =============================================
 # === OTHER COMMANDS ===
@@ -656,6 +727,13 @@ async def help_command(interaction: discord.Interaction):
         name="🧤 `/review_gk`",
         value="Create a review for goalkeepers\n"
               "**Stats:** DIV, POS, HAN, REF, KIC, PHY",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="🖼️ `/update_image <id>`",
+        value="Update card image for an existing review (Owner only)\n"
+              "Use this to fix broken/expired images!",
         inline=False
     )
     
