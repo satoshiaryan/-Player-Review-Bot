@@ -391,45 +391,23 @@ async def update_image(
     
     await interaction.response.defer(ephemeral=True)
     
-    # Check if review exists
     review = bot.db.get_review(review_id)
     if not review:
         await interaction.followup.send(f"❌ Review `{review_id}` not found!", ephemeral=True)
         return
     
-    # Download and store the new image
-    import base64
-    import urllib.request
+    success = bot.db.update_image(review_id, image.url)
     
-    image_base64 = None
-    try:
-        req = urllib.request.Request(image.url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=10) as response:
-            image_data = response.read()
-            image_base64 = base64.b64encode(image_data).decode('utf-8')
-            print(f"✅ Downloaded new image for review {review_id}: {len(image_data)} bytes")
-    except Exception as e:
-        await interaction.followup.send(f"❌ Failed to download image: {e}", ephemeral=True)
-        return
-    
-    # Update the database
-    with __import__('sqlite3').connect(bot.db.db_path) as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            UPDATE reviews 
-            SET image_url = ?, image_data = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-        ''', (image.url, image_base64, review_id))
-        conn.commit()
-    
-    embed = discord.Embed(
-        title="✅ Image Updated!",
-        description=f"Card image for review `{review_id}` (**{review['player_name']} {review['rating']}**) has been updated and stored permanently.",
-        color=discord.Color.green()
-    )
-    embed.set_footer(text="The image will no longer expire!")
-    
-    await interaction.followup.send(embed=embed, ephemeral=True)
+    if success:
+        embed = discord.Embed(
+            title="✅ Image Updated!",
+            description=f"Card image for review `{review_id}` (**{review['player_name']} {review['rating']}**) has been updated and stored permanently.",
+            color=discord.Color.green()
+        )
+        embed.set_footer(text="The image will no longer expire!")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+    else:
+        await interaction.followup.send(f"❌ Failed to update image for review `{review_id}`. Check logs.", ephemeral=True)
 
 # =============================================
 # === OTHER COMMANDS ===
