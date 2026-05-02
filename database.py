@@ -84,7 +84,7 @@ class Database:
                 with urllib.request.urlopen(req, timeout=10) as response:
                     image_data = response.read()
                     image_base64 = base64.b64encode(image_data).decode('utf-8')
-                    print(f"✅ Downloaded & stored image: {len(image_data)} bytes")
+                    print(f"✅ Downloaded & stored image: {len(image_data)} bytes ({len(image_base64)} chars base64)")
             except Exception as e:
                 print(f"⚠️ Could not download image: {e}")
         
@@ -95,6 +95,7 @@ class Database:
                 (player_name, rating, event, image_url, image_data, base_stats, skill_move, weak_foot, strong_foot, skill_points, reviewer_id, reviewer_name)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (player_name, rating, event, image_url, image_base64, base_stats, skill_move, weak_foot, strong_foot, skill_points, reviewer_id, reviewer_name))
+            conn.commit()
             return cursor.lastrowid
     
     def update_review_field(self, review_id: int, field: str, value):
@@ -110,6 +111,33 @@ class Database:
                 SET {field} = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
             ''', (value, review_id))
+            conn.commit()
+    
+    def update_image(self, review_id: int, image_url: str) -> bool:
+        """Download and permanently store an image for a review"""
+        try:
+            # Download the image
+            req = urllib.request.Request(image_url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=10) as response:
+                image_data = response.read()
+                image_base64 = base64.b64encode(image_data).decode('utf-8')
+                print(f"✅ Downloaded image for review {review_id}: {len(image_data)} bytes ({len(image_base64)} chars base64)")
+            
+            # Store in database
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE reviews 
+                    SET image_url = ?, image_data = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                ''', (image_url, image_base64, review_id))
+                conn.commit()
+                print(f"✅ Image stored in database for review {review_id}")
+                return True
+                
+        except Exception as e:
+            print(f"❌ Failed to update image for review {review_id}: {e}")
+            return False
     
     def get_review(self, review_id: int) -> Optional[Dict[str, Any]]:
         """Get a specific review by ID"""
@@ -133,6 +161,7 @@ class Database:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('DELETE FROM reviews WHERE id = ?', (review_id,))
+            conn.commit()
             return cursor.rowcount > 0
     
     def create_backup(self, backup_path: str = None) -> str:
@@ -156,6 +185,7 @@ class Database:
                     INSERT INTO backups (review_count, file_path)
                     VALUES (?, ?)
                 ''', (count, backup_path))
+                conn.commit()
             
             print(f"✅ Backup created successfully: {backup_path} ({count} reviews)")
             return backup_path
