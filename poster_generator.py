@@ -22,7 +22,7 @@ class Top10Poster:
         logo_path = "assets/logo.png"
         
         if os.path.exists(bg_path):
-            self.background = Image.open(bg_path).resize((self.width, self.height))
+            self.background = Image.open(bg_path).resize((self.width, self.height)).convert("RGBA")
         else:
             # Create gradient background if file missing
             self.background = self.create_gradient_bg()
@@ -46,19 +46,23 @@ class Top10Poster:
                 return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", size)
             return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", size)
         except:
-            return ImageFont.load_default()
+            try:
+                if bold:
+                    return ImageFont.truetype("DejaVuSans-Bold.ttf", size)
+                return ImageFont.truetype("DejaVuSans.ttf", size)
+            except:
+                return ImageFont.load_default()
     
     def create_gradient_bg(self):
         """Create a dark gradient background"""
-        from PIL import ImageDraw
-        img = Image.new('RGB', (self.width, self.height), '#1a1a2e')
+        img = Image.new('RGBA', (self.width, self.height), (26, 26, 46, 255))
         draw = ImageDraw.Draw(img)
         for i in range(self.height):
             ratio = i / self.height
             r = int(26 + (15 - 26) * ratio)
             g = int(26 + (15 - 26) * ratio)
             b = int(46 + (25 - 46) * ratio)
-            draw.line([(0, i), (self.width, i)], fill=(r, g, b))
+            draw.line([(0, i), (self.width, i)], fill=(r, g, b, 255))
         return img
     
     def generate(self, entries: list, position: str, position_name: str) -> io.BytesIO:
@@ -69,8 +73,8 @@ class Top10Poster:
         # Add logo (top right)
         if self.logo:
             logo_size = (100, 100)
-            self.logo = self.logo.resize(logo_size)
-            self.canvas.paste(self.logo, (self.width - 130, 30), self.logo)
+            logo_resized = self.logo.resize(logo_size)
+            self.canvas.paste(logo_resized, (self.width - 130, 30), logo_resized)
         
         # Title
         title = f"TOP 10 {position_name.upper()}"
@@ -111,10 +115,6 @@ class Top10Poster:
     
     def draw_top3(self, entries, position):
         """Draw top 3 players (large cards)"""
-        # Layout:
-        #      [  #1  ]  (center, big)
-        #   [ #2 ]  [ #3 ]  (smaller, side by side)
-        
         # #1 - Large center card
         if len(entries) >= 1:
             card = self.load_card_image(entries[0])
@@ -123,7 +123,8 @@ class Top10Poster:
                 x = self.width//2 - 200
                 y = 260
                 self.draw_card_border(x, y, 400, 400, '#FFD700', 8)
-                self.canvas.paste(card, (x + 6, y + 6))
+                # Paste with transparency mask
+                self.canvas.paste(card, (x + 6, y + 6), card)
                 # Name & rating
                 name = entries[0].get('player_name', 'Unknown')
                 rating = entries[0].get('rating', 'N/A')
@@ -139,7 +140,8 @@ class Top10Poster:
                 x, y = positions[i-1]
                 color = '#C0C0C0' if i == 1 else '#CD7F32'
                 self.draw_card_border(x, y, 350, 350, color, 6)
-                self.canvas.paste(card, (x + 5, y + 5))
+                # Paste with transparency mask
+                self.canvas.paste(card, (x + 5, y + 5), card)
                 medal = "🥈" if i == 1 else "🥉"
                 name = entries[i].get('player_name', 'Unknown')
                 rating = entries[i].get('rating', 'N/A')
@@ -163,20 +165,25 @@ class Top10Poster:
             card = self.load_card_image(entry)
             if card:
                 card = card.resize((card_size, card_size))
-                self.draw_card_border(x, y, card_size, card_size, '#444444', 4)
-                self.canvas.paste(card, (x + 3, y + 3))
-                name = entry.get('player_name', 'Unknown')
+                self.draw_card_border(x, y, card_size, card_size, '#555555', 4)
+                # Paste with transparency mask
+                self.canvas.paste(card, (x + 3, y + 3), card)
+                name = entry.get('player_name', 'Unknown')[:15]
                 rating = entry.get('rating', 'N/A')
-                self.draw.text((x + card_size//2, y + card_size + 5), name[:15], fill='#FFFFFF', font=self.font_rank, anchor='mt')
+                self.draw.text((x + card_size//2, y + card_size + 5), name, fill='#FFFFFF', font=self.font_rank, anchor='mt')
                 self.draw.text((x + card_size//2, y + card_size + 35), f"#{rank} • {rating}", fill='#AAAAAA', font=self.font_bottom, anchor='mt')
     
     def load_card_image(self, entry):
-        """Load card image from base64 data"""
+        """Load card image from base64 data, preserving transparency"""
         try:
             image_data = entry.get('image_data')
             if image_data:
                 image_bytes = base64.b64decode(image_data)
-                return Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+                img = Image.open(io.BytesIO(image_bytes))
+                # Keep RGBA mode to preserve transparency
+                if img.mode != 'RGBA':
+                    img = img.convert('RGBA')
+                return img
         except:
             pass
         return None
