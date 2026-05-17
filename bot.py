@@ -425,7 +425,6 @@ async def update_image(
 # === TOP 10 COMMANDS ===
 # =============================================
 
-# Shared position choices for all Top 10 commands
 ALL_POSITIONS = [
     app_commands.Choice(name="GK - Goalkeeper", value="GK"),
     app_commands.Choice(name="LB - Left Back", value="LB"),
@@ -567,6 +566,39 @@ async def top10_swap(interaction: discord.Interaction, position: str, rank1: int
         await interaction.response.send_message(f"✅ Swapped rank **#{rank1}** and **#{rank2}** in **{position}**!", ephemeral=True)
     else:
         await interaction.response.send_message("❌ Failed to swap! Make sure both ranks have players.", ephemeral=True)
+
+@bot.tree.command(name="top10_debug", description="Debug Top 10 - shows raw database entries (Owner Only)")
+@app_commands.describe(position="Position to check")
+@app_commands.choices(position=ALL_POSITIONS)
+async def top10_debug(interaction: discord.Interaction, position: str):
+    if not is_bot_owner(interaction.user.id):
+        await interaction.response.send_message("❌ Owner only!", ephemeral=True)
+        return
+    
+    entries = top10_db.get_top10(position)
+    
+    if not entries:
+        await interaction.response.send_message(f"❌ No entries in {position}", ephemeral=True)
+        return
+    
+    text = f"**{position} - {len(entries)} entries found:**\n"
+    for e in entries:
+        text += f"Rank `{e['rank']}`: **{e['player_name']}** ({e['rating']})\n"
+    
+    await interaction.response.send_message(text, ephemeral=True)
+
+@bot.tree.command(name="top10_clear", description="Clear all entries for a position (Owner Only)")
+@app_commands.describe(position="Position to clear")
+@app_commands.choices(position=ALL_POSITIONS)
+async def top10_clear(interaction: discord.Interaction, position: str):
+    if not is_bot_owner(interaction.user.id):
+        await interaction.response.send_message("❌ Owner only!", ephemeral=True)
+        return
+    
+    for rank in range(1, 11):
+        top10_db.remove_top10_entry(position, rank)
+    
+    await interaction.response.send_message(f"✅ Cleared all entries for **{position}**. Now re-add players with `/top10_add`.", ephemeral=True)
 
 # =============================================
 # === OTHER COMMANDS ===
@@ -867,7 +899,7 @@ async def help_command(interaction: discord.Interaction):
     
     embed.add_field(
         name="🔧 Top 10 Management",
-        value="`/top10_add` - Add player to Top 10\n`/top10_remove` - Remove player\n`/top10_swap` - Swap ranks",
+        value="`/top10_add` - Add player to Top 10\n`/top10_remove` - Remove player\n`/top10_swap` - Swap ranks\n`/top10_debug` - Show raw entries\n`/top10_clear` - Clear all entries",
         inline=False
     )
     
