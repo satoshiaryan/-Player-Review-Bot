@@ -17,14 +17,12 @@ class Top10Poster:
     
     def load_assets(self):
         """Load background and logo"""
-        # Background
         bg_path = "assets/background.jpg"
         logo_path = "assets/logo.png"
         
         if os.path.exists(bg_path):
             self.background = Image.open(bg_path).resize((self.width, self.height)).convert("RGBA")
         else:
-            # Create gradient background if file missing
             self.background = self.create_gradient_bg()
         
         if os.path.exists(logo_path):
@@ -35,8 +33,9 @@ class Top10Poster:
         # Try to load fonts
         self.font_title = self.get_font(60, bold=True)
         self.font_name = self.get_font(36, bold=True)
+        self.font_name_small = self.get_font(24, bold=True)
         self.font_rating = self.get_font(28)
-        self.font_rank = self.get_font(24)
+        self.font_rank = self.get_font(20)
         self.font_bottom = self.get_font(22)
     
     def get_font(self, size, bold=False):
@@ -52,6 +51,17 @@ class Top10Poster:
                 return ImageFont.truetype("DejaVuSans.ttf", size)
             except:
                 return ImageFont.load_default()
+    
+    def get_medal_text(self, rank):
+        """Get text medal for rank (since emojis don't work in Pillow)"""
+        if rank == 1:
+            return "1st"
+        elif rank == 2:
+            return "2nd"
+        elif rank == 3:
+            return "3rd"
+        else:
+            return f"#{rank}"
     
     def create_gradient_bg(self):
         """Create a dark gradient background"""
@@ -121,18 +131,16 @@ class Top10Poster:
             if card:
                 card = card.resize((400, 400))
                 x = self.width//2 - 200
-                y = 260
+                y = 240
                 self.draw_card_border(x, y, 400, 400, '#FFD700', 8)
-                # Paste with transparency mask
                 self.canvas.paste(card, (x + 6, y + 6), card)
-                # Name & rating
                 name = entries[0].get('player_name', 'Unknown')
                 rating = entries[0].get('rating', 'N/A')
-                self.draw.text((self.width//2, 680), name, fill='#FFD700', font=self.font_name, anchor='mt')
-                self.draw.text((self.width//2, 730), f"🥇 #{1}  •  {rating}", fill='#FFFFFF', font=self.font_rating, anchor='mt')
+                self.draw.text((self.width//2, 660), name, fill='#FFD700', font=self.font_name, anchor='mt')
+                self.draw.text((self.width//2, 710), f"⭐ 1st  •  {rating}", fill='#FFFFFF', font=self.font_rating, anchor='mt')
         
         # #2 & #3 - Side by side
-        positions = [(200, 800), (self.width - 650, 800)]
+        positions = [(200, 760), (self.width - 650, 760)]
         for i in range(1, min(3, len(entries))):
             card = self.load_card_image(entries[i])
             if card:
@@ -140,38 +148,72 @@ class Top10Poster:
                 x, y = positions[i-1]
                 color = '#C0C0C0' if i == 1 else '#CD7F32'
                 self.draw_card_border(x, y, 350, 350, color, 6)
-                # Paste with transparency mask
                 self.canvas.paste(card, (x + 5, y + 5), card)
-                medal = "🥈" if i == 1 else "🥉"
+                rank_text = self.get_medal_text(i + 1)
                 name = entries[i].get('player_name', 'Unknown')
                 rating = entries[i].get('rating', 'N/A')
-                self.draw.text((x + 175, 1165), name, fill=color, font=self.font_name, anchor='mt')
-                self.draw.text((x + 175, 1210), f"{medal} #{i+1}  •  {rating}", fill='#FFFFFF', font=self.font_rating, anchor='mt')
+                self.draw.text((x + 175, 1125), name, fill=color, font=self.font_name_small, anchor='mt')
+                self.draw.text((x + 175, 1165), f"⭐ {rank_text}  •  {rating}", fill='#FFFFFF', font=self.font_rating, anchor='mt')
     
     def draw_remaining(self, entries, position):
-        """Draw #4-#10 in a 3-column grid"""
-        start_y = 1280
-        card_size = 180
-        gap = 20
+        """Draw #4-#10 in a flexible grid (5 columns x 2 rows OR 4+3)"""
+        start_y = 1220
+        card_size = 160
+        gap_x = 30
+        gap_y = 20
         
-        for i, entry in enumerate(entries):
-            rank = i + 4
-            col = i % 3
-            row = i // 3
+        num_remaining = len(entries)
+        
+        # Use different layouts based on count
+        if num_remaining <= 7:
+            # 5 on first row, remaining on second
+            cols_row1 = min(5, num_remaining)
+            cols_row2 = num_remaining - cols_row1
             
-            x = 120 + col * (card_size + gap + 100)
-            y = start_y + row * (card_size + 80)
+            # Row 1 (first 5 cards)
+            for i in range(cols_row1):
+                entry = entries[i]
+                rank = i + 4
+                total_w = cols_row1 * card_size + (cols_row1 - 1) * gap_x
+                start_x = (self.width - total_w) // 2
+                x = start_x + i * (card_size + gap_x)
+                y = start_y
+                self.draw_small_card(entry, x, y, card_size, rank)
             
-            card = self.load_card_image(entry)
-            if card:
-                card = card.resize((card_size, card_size))
-                self.draw_card_border(x, y, card_size, card_size, '#555555', 4)
-                # Paste with transparency mask
-                self.canvas.paste(card, (x + 3, y + 3), card)
-                name = entry.get('player_name', 'Unknown')[:15]
-                rating = entry.get('rating', 'N/A')
-                self.draw.text((x + card_size//2, y + card_size + 5), name, fill='#FFFFFF', font=self.font_rank, anchor='mt')
-                self.draw.text((x + card_size//2, y + card_size + 35), f"#{rank} • {rating}", fill='#AAAAAA', font=self.font_bottom, anchor='mt')
+            # Row 2 (remaining cards, centered)
+            if cols_row2 > 0:
+                total_w2 = cols_row2 * card_size + (cols_row2 - 1) * gap_x
+                start_x2 = (self.width - total_w2) // 2
+                for i in range(cols_row2):
+                    entry = entries[cols_row1 + i]
+                    rank = cols_row1 + i + 4
+                    x = start_x2 + i * (card_size + gap_x)
+                    y = start_y + card_size + gap_y + 50
+                    self.draw_small_card(entry, x, y, card_size, rank)
+        else:
+            # Just fit all in a grid
+            for i, entry in enumerate(entries):
+                rank = i + 4
+                col = i % 5
+                row = i // 5
+                total_w = min(num_remaining, 5) * card_size + (min(num_remaining, 5) - 1) * gap_x
+                start_x = (self.width - total_w) // 2
+                x = start_x + col * (card_size + gap_x)
+                y = start_y + row * (card_size + gap_y + 50)
+                self.draw_small_card(entry, x, y, card_size, rank)
+    
+    def draw_small_card(self, entry, x, y, card_size, rank):
+        """Draw a single small card for ranks 4-10"""
+        card = self.load_card_image(entry)
+        if card:
+            card = card.resize((card_size, card_size))
+            self.draw_card_border(x, y, card_size, card_size, '#555555', 3)
+            self.canvas.paste(card, (x + 3, y + 3), card)
+            name = entry.get('player_name', 'Unknown')[:12]
+            rating = entry.get('rating', 'N/A')
+            rank_text = self.get_medal_text(rank)
+            self.draw.text((x + card_size//2, y + card_size + 5), name, fill='#FFFFFF', font=self.font_rank, anchor='mt')
+            self.draw.text((x + card_size//2, y + card_size + 30), f"#{rank} • {rating}", fill='#AAAAAA', font=self.font_bottom, anchor='mt')
     
     def load_card_image(self, entry):
         """Load card image from base64 data, preserving transparency"""
@@ -180,7 +222,6 @@ class Top10Poster:
             if image_data:
                 image_bytes = base64.b64decode(image_data)
                 img = Image.open(io.BytesIO(image_bytes))
-                # Keep RGBA mode to preserve transparency
                 if img.mode != 'RGBA':
                     img = img.convert('RGBA')
                 return img
