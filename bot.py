@@ -6,6 +6,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from database import Database, Top10Database
 from views import ReviewEditView, create_review_embed
+from poster_generator import Top10Poster
 import threading
 from flask import Flask
 import json
@@ -91,8 +92,9 @@ class BotConfig:
 
 config = BotConfig()
 
-# Initialize Top 10 database
+# Initialize Top 10 database and poster generator
 top10_db = Top10Database()
+poster_gen = Top10Poster()
 
 # --- Review Search Dropdown View ---
 class ReviewSearchView(discord.ui.View):
@@ -186,7 +188,7 @@ async def on_ready():
     print(f'📊 Total reviews in database: {bot.db.get_review_count()}')
     print(f'👑 Bot Owner ID: {BOT_OWNER_ID}')
     print(f'📝 Allowed Reviewers: {ALLOWED_REVIEWERS}')
-    print(f'🏆 Top 10 System: Active')
+    print(f'🏆 Top 10 System: Active (Poster Mode)')
     reviewer_role = config.get_reviewer_role_id()
     if reviewer_role:
         print(f'🎭 Reviewer Role ID: {reviewer_role}')
@@ -423,7 +425,7 @@ async def update_image(
 # === TOP 10 COMMANDS ===
 # =============================================
 
-@bot.tree.command(name="top10", description="View the Top 10 players for any position with card images")
+@bot.tree.command(name="top10", description="View the Top 10 poster with all player card images")
 @app_commands.describe(position="Select the position")
 @app_commands.choices(position=[
     app_commands.Choice(name="GK - Goalkeeper", value="GK"),
@@ -440,7 +442,7 @@ async def update_image(
     app_commands.Choice(name="ST - Striker", value="ST"),
 ])
 async def top10_view(interaction: discord.Interaction, position: str):
-    """View the gallery-style Top 10 for a position"""
+    """Generate and send the Top 10 poster"""
     await interaction.response.defer()
     
     position_names = {
@@ -462,47 +464,22 @@ async def top10_view(interaction: discord.Interaction, position: str):
         await interaction.followup.send(embed=embed)
         return
     
-    # Send header
-    embed = discord.Embed(
-        title=f"🏆 Top 10 {position_names.get(position, position)}",
-        description=f"The best **{position}** players in FC Mobile\n━━━━━━━━━━━━━━━━━━",
-        color=0xF5A623
-    )
-    embed.set_footer(text="FELIX PR | Top 10 Leaderboard")
-    await interaction.followup.send(embed=embed)
-    
-    # Send each player using followup
-    for entry in entries:
-        medal = "🥇" if entry['rank'] == 1 else "🥈" if entry['rank'] == 2 else "🥉" if entry['rank'] == 3 else f"#{entry['rank']}"
+    # Generate the poster image
+    try:
+        poster_bytes = poster_gen.generate(entries, position, position_names.get(position, position))
+        poster_file = discord.File(poster_bytes, filename=f"top10_{position}.png")
         
-        if entry['rank'] == 1:
-            color = 0xFFD700
-        elif entry['rank'] == 2:
-            color = 0xC0C0C0
-        elif entry['rank'] == 3:
-            color = 0xCD7F32
-        else:
-            color = 0x1E40AF
-        
-        player_embed = discord.Embed(
-            title=f"{medal} {entry['player_name']}",
-            description=f"**Card:** {entry['card_name']}\n**Rating:** {entry['rating']}",
-            color=color
+        embed = discord.Embed(
+            title=f"🏆 Top 10 {position_names.get(position, position)}",
+            color=0xF5A623
         )
+        embed.set_image(url=f"attachment://top10_{position}.png")
+        embed.set_footer(text="FELIX PR | Top 10 Leaderboard • Updated weekly")
         
-        image_file = None
-        if entry.get('image_data'):
-            try:
-                image_bytes = base64.b64decode(entry['image_data'])
-                image_file = discord.File(io.BytesIO(image_bytes), filename=f"top10_{position}_{entry['rank']}.png")
-                player_embed.set_image(url=f"attachment://top10_{position}_{entry['rank']}.png")
-            except:
-                pass
-        
-        if image_file:
-            await interaction.followup.send(embed=player_embed, file=image_file)
-        else:
-            await interaction.followup.send(embed=player_embed)
+        await interaction.followup.send(embed=embed, file=poster_file)
+    except Exception as e:
+        print(f"❌ Poster generation error: {e}")
+        await interaction.followup.send(f"❌ Error generating poster. Make sure assets are uploaded.\nDetails: {e}")
 
 @bot.tree.command(name="top10_add", description="Add/Update a player in the Top 10 (Owner/Admin Only)")
 @app_commands.describe(
@@ -568,16 +545,6 @@ async def top10_add(
 )
 @app_commands.choices(position=[
     app_commands.Choice(name="GK - Goalkeeper", value="GK"),
-    app_commands.Choice(name="LB - Left Back", value="LB"),
-    app_commands.Choice(name="RB - Right Back", value="RB"),
-    app_commands.Choice(name="CB - Center Back", value="CB"),
-    app_commands.Choice(name="CM - Center Midfielder", value="CM"),
-    app_commands.Choice(name="CDM - Defensive Midfielder", value="CDM"),
-    app_commands.Choice(name="CAM - Attacking Midfielder", value="CAM"),
-    app_commands.Choice(name="LM - Left Midfielder", value="LM"),
-    app_commands.Choice(name="RM - Right Midfielder", value="RM"),
-    app_commands.Choice(name="LW - Left Winger", value="LW"),
-    app_commands.Choice(name="RW - Right Winger", value="RW"),
     app_commands.Choice(name="ST - Striker", value="ST"),
 ])
 async def top10_remove(interaction: discord.Interaction, position: str, rank: int):
@@ -600,16 +567,6 @@ async def top10_remove(interaction: discord.Interaction, position: str, rank: in
 )
 @app_commands.choices(position=[
     app_commands.Choice(name="GK - Goalkeeper", value="GK"),
-    app_commands.Choice(name="LB - Left Back", value="LB"),
-    app_commands.Choice(name="RB - Right Back", value="RB"),
-    app_commands.Choice(name="CB - Center Back", value="CB"),
-    app_commands.Choice(name="CM - Center Midfielder", value="CM"),
-    app_commands.Choice(name="CDM - Defensive Midfielder", value="CDM"),
-    app_commands.Choice(name="CAM - Attacking Midfielder", value="CAM"),
-    app_commands.Choice(name="LM - Left Midfielder", value="LM"),
-    app_commands.Choice(name="RM - Right Midfielder", value="RM"),
-    app_commands.Choice(name="LW - Left Winger", value="LW"),
-    app_commands.Choice(name="RW - Right Winger", value="RW"),
     app_commands.Choice(name="ST - Striker", value="ST"),
 ])
 async def top10_swap(interaction: discord.Interaction, position: str, rank1: int, rank2: int):
@@ -921,7 +878,7 @@ async def help_command(interaction: discord.Interaction):
     
     embed.add_field(
         name="🏆 `/top10 <position>`",
-        value="View gallery-style Top 10 leaderboard with card images",
+        value="Generate a poster-style Top 10 leaderboard with all card images",
         inline=False
     )
     
