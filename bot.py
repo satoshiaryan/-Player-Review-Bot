@@ -425,9 +425,8 @@ async def update_image(
 # === TOP 10 COMMANDS ===
 # =============================================
 
-@bot.tree.command(name="top10", description="View the Top 10 poster with all player card images")
-@app_commands.describe(position="Select the position")
-@app_commands.choices(position=[
+# Shared position choices for all Top 10 commands
+ALL_POSITIONS = [
     app_commands.Choice(name="GK - Goalkeeper", value="GK"),
     app_commands.Choice(name="LB - Left Back", value="LB"),
     app_commands.Choice(name="RB - Right Back", value="RB"),
@@ -440,7 +439,11 @@ async def update_image(
     app_commands.Choice(name="LW - Left Winger", value="LW"),
     app_commands.Choice(name="RW - Right Winger", value="RW"),
     app_commands.Choice(name="ST - Striker", value="ST"),
-])
+]
+
+@bot.tree.command(name="top10", description="View the Top 10 poster with all player card images")
+@app_commands.describe(position="Select the position")
+@app_commands.choices(position=ALL_POSITIONS)
 async def top10_view(interaction: discord.Interaction, position: str):
     """Generate and send the Top 10 poster"""
     await interaction.response.defer()
@@ -464,7 +467,6 @@ async def top10_view(interaction: discord.Interaction, position: str):
         await interaction.followup.send(embed=embed)
         return
     
-    # Generate the poster image
     try:
         poster_bytes = poster_gen.generate(entries, position, position_names.get(position, position))
         poster_file = discord.File(poster_bytes, filename=f"top10_{position}.png")
@@ -490,20 +492,7 @@ async def top10_view(interaction: discord.Interaction, position: str):
     rating="Player rating (e.g., 117 OVR)",
     image="Upload the player card image"
 )
-@app_commands.choices(position=[
-    app_commands.Choice(name="GK - Goalkeeper", value="GK"),
-    app_commands.Choice(name="LB - Left Back", value="LB"),
-    app_commands.Choice(name="RB - Right Back", value="RB"),
-    app_commands.Choice(name="CB - Center Back", value="CB"),
-    app_commands.Choice(name="CM - Center Midfielder", value="CM"),
-    app_commands.Choice(name="CDM - Defensive Midfielder", value="CDM"),
-    app_commands.Choice(name="CAM - Attacking Midfielder", value="CAM"),
-    app_commands.Choice(name="LM - Left Midfielder", value="LM"),
-    app_commands.Choice(name="RM - Right Midfielder", value="RM"),
-    app_commands.Choice(name="LW - Left Winger", value="LW"),
-    app_commands.Choice(name="RW - Right Winger", value="RW"),
-    app_commands.Choice(name="ST - Striker", value="ST"),
-])
+@app_commands.choices(position=ALL_POSITIONS)
 async def top10_add(
     interaction: discord.Interaction,
     position: str,
@@ -543,10 +532,7 @@ async def top10_add(
     position="Position to remove from",
     rank="Rank number to remove (1-10)"
 )
-@app_commands.choices(position=[
-    app_commands.Choice(name="GK - Goalkeeper", value="GK"),
-    app_commands.Choice(name="ST - Striker", value="ST"),
-])
+@app_commands.choices(position=ALL_POSITIONS)
 async def top10_remove(interaction: discord.Interaction, position: str, rank: int):
     if not can_edit_top10(interaction.user.id):
         await interaction.response.send_message("❌ You don't have permission!", ephemeral=True)
@@ -565,10 +551,7 @@ async def top10_remove(interaction: discord.Interaction, position: str, rank: in
     rank1="First rank",
     rank2="Second rank"
 )
-@app_commands.choices(position=[
-    app_commands.Choice(name="GK - Goalkeeper", value="GK"),
-    app_commands.Choice(name="ST - Striker", value="ST"),
-])
+@app_commands.choices(position=ALL_POSITIONS)
 async def top10_swap(interaction: discord.Interaction, position: str, rank1: int, rank2: int):
     if not can_edit_top10(interaction.user.id):
         await interaction.response.send_message("❌ You don't have permission!", ephemeral=True)
