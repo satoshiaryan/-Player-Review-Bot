@@ -32,9 +32,12 @@ class Top10Poster:
         
         # Try to load fonts
         self.font_title = self.get_font(60, bold=True)
-        self.font_name = self.get_font(36, bold=True)
-        self.font_name_small = self.get_font(24, bold=True)
+        self.font_name_big = self.get_font(36, bold=True)
+        self.font_name_med = self.get_font(24, bold=True)
+        self.font_name_small = self.get_font(18, bold=True)
+        self.font_name_tiny = self.get_font(14, bold=True)
         self.font_rating = self.get_font(28)
+        self.font_rating_small = self.get_font(20)
         self.font_rank = self.get_font(20)
         self.font_bottom = self.get_font(22)
     
@@ -53,7 +56,7 @@ class Top10Poster:
                 return ImageFont.load_default()
     
     def get_medal_text(self, rank):
-        """Get text medal for rank (since emojis don't work in Pillow)"""
+        """Get text medal for rank"""
         if rank == 1:
             return "1st"
         elif rank == 2:
@@ -62,6 +65,24 @@ class Top10Poster:
             return "3rd"
         else:
             return f"#{rank}"
+    
+    def get_font_for_name(self, name, max_width, base_font):
+        """Get appropriate font size to fit name within max_width"""
+        # Try base font first
+        bbox = self.draw.textbbox((0, 0), name, font=base_font)
+        text_width = bbox[2] - bbox[0]
+        
+        if text_width <= max_width:
+            return base_font
+        
+        # Try smaller fonts
+        for font in [self.font_name_med, self.font_name_small, self.font_name_tiny]:
+            bbox = self.draw.textbbox((0, 0), name, font=font)
+            text_width = bbox[2] - bbox[0]
+            if text_width <= max_width:
+                return font
+        
+        return self.font_name_tiny
     
     def create_gradient_bg(self):
         """Create a dark gradient background"""
@@ -134,9 +155,12 @@ class Top10Poster:
                 y = 240
                 self.draw_card_border(x, y, 400, 400, '#FFD700', 8)
                 self.canvas.paste(card, (x + 6, y + 6), card)
+                
                 name = entries[0].get('player_name', 'Unknown')
                 rating = entries[0].get('rating', 'N/A')
-                self.draw.text((self.width//2, 660), name, fill='#FFD700', font=self.font_name, anchor='mt')
+                # #1 has plenty of space - use big font, fallback to medium
+                font = self.get_font_for_name(name, 380, self.font_name_big)
+                self.draw.text((self.width//2, 660), name, fill='#FFD700', font=font, anchor='mt')
                 self.draw.text((self.width//2, 710), f"⭐ 1st  •  {rating}", fill='#FFFFFF', font=self.font_rating, anchor='mt')
         
         # #2 & #3 - Side by side
@@ -149,14 +173,17 @@ class Top10Poster:
                 color = '#C0C0C0' if i == 1 else '#CD7F32'
                 self.draw_card_border(x, y, 350, 350, color, 6)
                 self.canvas.paste(card, (x + 5, y + 5), card)
+                
                 rank_text = self.get_medal_text(i + 1)
                 name = entries[i].get('player_name', 'Unknown')
                 rating = entries[i].get('rating', 'N/A')
-                self.draw.text((x + 175, 1125), name, fill=color, font=self.font_name_small, anchor='mt')
-                self.draw.text((x + 175, 1165), f"⭐ {rank_text}  •  {rating}", fill='#FFFFFF', font=self.font_rating, anchor='mt')
+                # #2/#3 have 330px width for name
+                font = self.get_font_for_name(name, 330, self.font_name_med)
+                self.draw.text((x + 175, 1125), name, fill=color, font=font, anchor='mt')
+                self.draw.text((x + 175, 1165), f"⭐ {rank_text}  •  {rating}", fill='#FFFFFF', font=self.font_rating_small, anchor='mt')
     
     def draw_remaining(self, entries, position):
-        """Draw #4-#10 in a flexible grid (5 columns x 2 rows OR 4+3)"""
+        """Draw #4-#10 in a flexible grid"""
         start_y = 1220
         card_size = 160
         gap_x = 30
@@ -164,13 +191,11 @@ class Top10Poster:
         
         num_remaining = len(entries)
         
-        # Use different layouts based on count
         if num_remaining <= 7:
-            # 5 on first row, remaining on second
             cols_row1 = min(5, num_remaining)
             cols_row2 = num_remaining - cols_row1
             
-            # Row 1 (first 5 cards)
+            # Row 1
             for i in range(cols_row1):
                 entry = entries[i]
                 rank = i + 4
@@ -180,7 +205,7 @@ class Top10Poster:
                 y = start_y
                 self.draw_small_card(entry, x, y, card_size, rank)
             
-            # Row 2 (remaining cards, centered)
+            # Row 2 (centered)
             if cols_row2 > 0:
                 total_w2 = cols_row2 * card_size + (cols_row2 - 1) * gap_x
                 start_x2 = (self.width - total_w2) // 2
@@ -191,7 +216,6 @@ class Top10Poster:
                     y = start_y + card_size + gap_y + 50
                     self.draw_small_card(entry, x, y, card_size, rank)
         else:
-            # Just fit all in a grid
             for i, entry in enumerate(entries):
                 rank = i + 4
                 col = i % 5
@@ -209,10 +233,14 @@ class Top10Poster:
             card = card.resize((card_size, card_size))
             self.draw_card_border(x, y, card_size, card_size, '#555555', 3)
             self.canvas.paste(card, (x + 3, y + 3), card)
-            name = entry.get('player_name', 'Unknown')[:12]
+            
+            name = entry.get('player_name', 'Unknown')
             rating = entry.get('rating', 'N/A')
-            rank_text = self.get_medal_text(rank)
-            self.draw.text((x + card_size//2, y + card_size + 5), name, fill='#FFFFFF', font=self.font_rank, anchor='mt')
+            
+            # Use smaller font for long names (cards are only 160px wide)
+            font = self.get_font_for_name(name, 150, self.font_name_small)
+            
+            self.draw.text((x + card_size//2, y + card_size + 5), name, fill='#FFFFFF', font=font, anchor='mt')
             self.draw.text((x + card_size//2, y + card_size + 30), f"#{rank} • {rating}", fill='#AAAAAA', font=self.font_bottom, anchor='mt')
     
     def load_card_image(self, entry):
