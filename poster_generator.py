@@ -68,14 +68,12 @@ class Top10Poster:
     
     def get_font_for_name(self, name, max_width, base_font):
         """Get appropriate font size to fit name within max_width"""
-        # Try base font first
         bbox = self.draw.textbbox((0, 0), name, font=base_font)
         text_width = bbox[2] - bbox[0]
         
         if text_width <= max_width:
             return base_font
         
-        # Try smaller fonts
         for font in [self.font_name_med, self.font_name_small, self.font_name_tiny]:
             bbox = self.draw.textbbox((0, 0), name, font=font)
             text_width = bbox[2] - bbox[0]
@@ -158,7 +156,6 @@ class Top10Poster:
                 
                 name = entries[0].get('player_name', 'Unknown')
                 rating = entries[0].get('rating', 'N/A')
-                # #1 has plenty of space - use big font, fallback to medium
                 font = self.get_font_for_name(name, 380, self.font_name_big)
                 self.draw.text((self.width//2, 660), name, fill='#FFD700', font=font, anchor='mt')
                 self.draw.text((self.width//2, 710), f"⭐ 1st  •  {rating}", fill='#FFFFFF', font=self.font_rating, anchor='mt')
@@ -177,13 +174,12 @@ class Top10Poster:
                 rank_text = self.get_medal_text(i + 1)
                 name = entries[i].get('player_name', 'Unknown')
                 rating = entries[i].get('rating', 'N/A')
-                # #2/#3 have 330px width for name
                 font = self.get_font_for_name(name, 330, self.font_name_med)
                 self.draw.text((x + 175, 1125), name, fill=color, font=font, anchor='mt')
                 self.draw.text((x + 175, 1165), f"⭐ {rank_text}  •  {rating}", fill='#FFFFFF', font=self.font_rating_small, anchor='mt')
     
     def draw_remaining(self, entries, position):
-        """Draw #4-#10 in a flexible grid"""
+        """Draw #4-#10 in a grid: 5 on top row, remaining centered on bottom row"""
         start_y = 1220
         card_size = 160
         gap_x = 30
@@ -191,39 +187,29 @@ class Top10Poster:
         
         num_remaining = len(entries)
         
-        if num_remaining <= 7:
-            cols_row1 = min(5, num_remaining)
-            cols_row2 = num_remaining - cols_row1
-            
-            # Row 1
-            for i in range(cols_row1):
-                entry = entries[i]
-                rank = i + 4
-                total_w = cols_row1 * card_size + (cols_row1 - 1) * gap_x
-                start_x = (self.width - total_w) // 2
-                x = start_x + i * (card_size + gap_x)
-                y = start_y
-                self.draw_small_card(entry, x, y, card_size, rank)
-            
-            # Row 2 (centered)
-            if cols_row2 > 0:
-                total_w2 = cols_row2 * card_size + (cols_row2 - 1) * gap_x
-                start_x2 = (self.width - total_w2) // 2
-                for i in range(cols_row2):
-                    entry = entries[cols_row1 + i]
-                    rank = cols_row1 + i + 4
-                    x = start_x2 + i * (card_size + gap_x)
-                    y = start_y + card_size + gap_y + 50
-                    self.draw_small_card(entry, x, y, card_size, rank)
-        else:
-            for i, entry in enumerate(entries):
-                rank = i + 4
-                col = i % 5
-                row = i // 5
-                total_w = min(num_remaining, 5) * card_size + (min(num_remaining, 5) - 1) * gap_x
-                start_x = (self.width - total_w) // 2
-                x = start_x + col * (card_size + gap_x)
-                y = start_y + row * (card_size + gap_y + 50)
+        # Always: 5 cards on top row, rest centered on bottom row
+        cards_in_row1 = min(5, num_remaining)
+        cards_in_row2 = num_remaining - cards_in_row1
+        
+        # Row 1 (first 5 cards: ranks 4-8)
+        total_w1 = cards_in_row1 * card_size + (cards_in_row1 - 1) * gap_x
+        start_x1 = (self.width - total_w1) // 2
+        for i in range(cards_in_row1):
+            entry = entries[i]
+            rank = i + 4
+            x = start_x1 + i * (card_size + gap_x)
+            y = start_y
+            self.draw_small_card(entry, x, y, card_size, rank)
+        
+        # Row 2 (remaining cards: ranks 9-10, centered)
+        if cards_in_row2 > 0:
+            total_w2 = cards_in_row2 * card_size + (cards_in_row2 - 1) * gap_x
+            start_x2 = (self.width - total_w2) // 2
+            for i in range(cards_in_row2):
+                entry = entries[cards_in_row1 + i]
+                rank = cards_in_row1 + i + 4
+                x = start_x2 + i * (card_size + gap_x)
+                y = start_y + card_size + gap_y + 50
                 self.draw_small_card(entry, x, y, card_size, rank)
     
     def draw_small_card(self, entry, x, y, card_size, rank):
@@ -237,7 +223,6 @@ class Top10Poster:
             name = entry.get('player_name', 'Unknown')
             rating = entry.get('rating', 'N/A')
             
-            # Use smaller font for long names (cards are only 160px wide)
             font = self.get_font_for_name(name, 150, self.font_name_small)
             
             self.draw.text((x + card_size//2, y + card_size + 5), name, fill='#FFFFFF', font=font, anchor='mt')
