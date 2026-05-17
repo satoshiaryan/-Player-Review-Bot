@@ -471,7 +471,7 @@ async def top10_view(interaction: discord.Interaction, position: str):
     embed.set_footer(text="FELIX PR | Top 10 Leaderboard")
     await interaction.followup.send(embed=embed)
     
-    # Send each player with their card image
+    # Send each player using followup
     for entry in entries:
         medal = "🥇" if entry['rank'] == 1 else "🥈" if entry['rank'] == 2 else "🥉" if entry['rank'] == 3 else f"#{entry['rank']}"
         
@@ -500,9 +500,9 @@ async def top10_view(interaction: discord.Interaction, position: str):
                 pass
         
         if image_file:
-            await interaction.channel.send(embed=player_embed, file=image_file)
+            await interaction.followup.send(embed=player_embed, file=image_file)
         else:
-            await interaction.channel.send(embed=player_embed)
+            await interaction.followup.send(embed=player_embed)
 
 @bot.tree.command(name="top10_add", description="Add/Update a player in the Top 10 (Owner/Admin Only)")
 @app_commands.describe(
@@ -752,16 +752,10 @@ async def backup_command(interaction: discord.Interaction):
         backup_path = bot.db.create_backup()
         if os.path.exists(backup_path) and os.path.getsize(backup_path) > 0:
             files_to_send.append(discord.File(backup_path, filename="fcm_reviews.db"))
-            print(f"✅ Backup file created: {backup_path} ({os.path.getsize(backup_path)} bytes)")
-        else:
-            print(f"⚠️ Backup file empty or missing")
     except Exception as e:
         print(f"❌ Backup failed: {e}")
-        if os.path.exists('fcm_reviews.db'):
-            db_size = os.path.getsize('fcm_reviews.db')
-            if db_size > 0:
-                files_to_send.append(discord.File('fcm_reviews.db'))
-                print(f"⚠️ Using fallback direct file read: {db_size} bytes")
+        if os.path.exists('fcm_reviews.db') and os.path.getsize('fcm_reviews.db') > 0:
+            files_to_send.append(discord.File('fcm_reviews.db'))
     
     if os.path.exists('top10.db'):
         files_to_send.append(discord.File('top10.db'))
@@ -770,10 +764,7 @@ async def backup_command(interaction: discord.Interaction):
         files_to_send.append(discord.File('bot_config.json'))
     
     if not files_to_send:
-        await interaction.followup.send(
-            "❌ **Backup Failed**\nNo files could be backed up.",
-            ephemeral=True
-        )
+        await interaction.followup.send("❌ **Backup Failed**\nNo files could be backed up.", ephemeral=True)
         return
     
     embed = discord.Embed(
@@ -824,7 +815,6 @@ async def restore_command(
             file_data = await db_file.read()
             with open('fcm_reviews.db', 'wb') as f:
                 f.write(file_data)
-            
             bot.db = Database()
             count = bot.db.get_review_count()
             restored.append(f"✅ fcm_reviews.db ({count} reviews)")
@@ -861,7 +851,6 @@ async def restore_command(
         embed.add_field(name="✅ Restored", value="\n".join(restored), inline=False)
     if failed:
         embed.add_field(name="❌ Failed", value="\n".join(failed), inline=False)
-    
     if restored:
         embed.add_field(name="⚠️ Note", value="Restart recommended for full effect", inline=False)
     
