@@ -66,7 +66,7 @@ class BotConfig:
         with open(CONFIG_FILE, 'w') as f: json.dump(self.data, f)
     def get_reviewer_role_id(self):
         return self.data.get("reviewer_role_id")
-    def set_reviewer_role_id(self, role_id):
+    def set_reviewer_role_id(self, role_id: int):
         self.data["reviewer_role_id"] = role_id; self.save()
 
 config = BotConfig()
@@ -75,13 +75,13 @@ poster_gen = Top10Poster()
 
 # --- Review Search Dropdown ---
 class ReviewSearchView(discord.ui.View):
-    def __init__(self, matching_reviews, db, config):
+    def __init__(self, matching_reviews: list, db: Database, config: BotConfig):
         super().__init__(timeout=60)
         self.db = db; self.config = config
         self.add_item(ReviewSelect(matching_reviews, db, config))
 
 class ReviewSelect(discord.ui.Select):
-    def __init__(self, matching_reviews, db, config):
+    def __init__(self, matching_reviews: list, db: Database, config: BotConfig):
         self.db = db; self.config = config
         options = []
         for review in matching_reviews[:25]:
@@ -94,7 +94,7 @@ class ReviewSelect(discord.ui.Select):
             options.append(discord.SelectOption(label=label, description=description, value=str(review['id']), emoji=status))
         super().__init__(placeholder="Select a review...", min_values=1, max_values=1, options=options)
     
-    async def callback(self, interaction):
+    async def callback(self, interaction: discord.Interaction):
         review_id = int(self.values[0])
         review = self.db.get_review(review_id)
         if not review:
@@ -116,9 +116,9 @@ class FCMReviewBot(commands.Bot):
 
 bot = FCMReviewBot()
 
-def is_allowed_reviewer(uid): return uid in ALLOWED_REVIEWERS
-def is_bot_owner(uid): return uid == BOT_OWNER_ID
-def can_edit_top10(uid): return uid == BOT_OWNER_ID or uid in [553418145063239684]
+def is_allowed_reviewer(uid: int) -> bool: return uid in ALLOWED_REVIEWERS
+def is_bot_owner(uid: int) -> bool: return uid == BOT_OWNER_ID
+def can_edit_top10(uid: int) -> bool: return uid == BOT_OWNER_ID or uid in [553418145063239684]
 
 @bot.event
 async def on_ready():
@@ -132,16 +132,23 @@ async def on_ready():
 # =============================================
 
 @bot.tree.command(name="review_outfield", description="Create outfield player review")
-@app_commands.describe(player_name="Player name", rating="Rating (e.g., 97 OVR)", event="Event/Promo",
+@app_commands.describe(
+    player_name="Player name", rating="Rating (e.g., 97 OVR)", event="Event/Promo",
     pace="PACE", shooting="SHOOTING", passing="PASSING", dribbling="DRIBBLING",
     defending="DEFENDING", physical="PHYSICAL", skill_move="Skill Move (1-5)",
     weak_foot="Weak Foot (1-5)", strong_foot="Strong Foot", skill_points="Skill Points",
     image="Player card image")
-@app_commands.choices(skill_move=[app_commands.Choice(name=f"{i} ★", value=i) for i in range(1,6)],
+@app_commands.choices(
+    skill_move=[app_commands.Choice(name=f"{i} ★", value=i) for i in range(1,6)],
     weak_foot=[app_commands.Choice(name=f"{i} ★", value=i) for i in range(1,6)],
     strong_foot=[app_commands.Choice(name="Left", value="Left"), app_commands.Choice(name="Right", value="Right")])
-async def review_outfield(interaction, player_name, rating, event, pace, shooting, passing,
-    dribbling, defending, physical, skill_move, weak_foot, strong_foot, skill_points="", image=None):
+async def review_outfield(
+    interaction: discord.Interaction,
+    player_name: str, rating: str, event: str,
+    pace: str, shooting: str, passing: str, dribbling: str, defending: str, physical: str,
+    skill_move: int, weak_foot: int, strong_foot: str,
+    skill_points: str = "", image: discord.Attachment = None):
+    
     if not is_allowed_reviewer(interaction.user.id):
         await interaction.response.send_message("❌ Not authorized!", ephemeral=True); return
     await interaction.response.defer()
@@ -156,16 +163,23 @@ async def review_outfield(interaction, player_name, rating, event, pace, shootin
     else: await interaction.followup.send(embed=embed, view=view)
 
 @bot.tree.command(name="review_gk", description="Create goalkeeper review")
-@app_commands.describe(player_name="Player name", rating="Rating (e.g., 96 OVR)", event="Event/Promo",
+@app_commands.describe(
+    player_name="Player name", rating="Rating (e.g., 96 OVR)", event="Event/Promo",
     diving="DIVING", positioning="POSITIONING", handling="HANDLING", reflexes="REFLEXES",
     kicking="KICKING", physical="PHYSICAL", skill_move="Skill Move (1-5)",
     weak_foot="Weak Foot (1-5)", strong_foot="Strong Foot", skill_points="Skill Points",
     image="Player card image")
-@app_commands.choices(skill_move=[app_commands.Choice(name=f"{i} ★", value=i) for i in range(1,6)],
+@app_commands.choices(
+    skill_move=[app_commands.Choice(name=f"{i} ★", value=i) for i in range(1,6)],
     weak_foot=[app_commands.Choice(name=f"{i} ★", value=i) for i in range(1,6)],
     strong_foot=[app_commands.Choice(name="Left", value="Left"), app_commands.Choice(name="Right", value="Right")])
-async def review_gk(interaction, player_name, rating, event, diving, positioning, handling,
-    reflexes, kicking, physical, skill_move, weak_foot, strong_foot, skill_points="", image=None):
+async def review_gk(
+    interaction: discord.Interaction,
+    player_name: str, rating: str, event: str,
+    diving: str, positioning: str, handling: str, reflexes: str, kicking: str, physical: str,
+    skill_move: int, weak_foot: int, strong_foot: str,
+    skill_points: str = "", image: discord.Attachment = None):
+    
     if not is_allowed_reviewer(interaction.user.id):
         await interaction.response.send_message("❌ Not authorized!", ephemeral=True); return
     await interaction.response.defer()
@@ -181,7 +195,7 @@ async def review_gk(interaction, player_name, rating, event, diving, positioning
 
 @bot.tree.command(name="update_image", description="Update card image (Owner Only)")
 @app_commands.describe(review_id="Review ID", image="New card image")
-async def update_image(interaction, review_id, image):
+async def update_image(interaction: discord.Interaction, review_id: int, image: discord.Attachment):
     if not is_bot_owner(interaction.user.id):
         await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
     await interaction.response.defer(ephemeral=True)
@@ -210,7 +224,7 @@ PN = {"GK":"Goalkeeper","LB":"Left Back","RB":"Right Back","CB":"Center Back",
 @bot.tree.command(name="top10", description="View Top 10 poster")
 @app_commands.describe(position="Select position")
 @app_commands.choices(position=ALL_POSITIONS)
-async def top10_view(interaction, position):
+async def top10_view(interaction: discord.Interaction, position: str):
     await interaction.response.defer()
     entries = top10_db.get_top10(position)
     if not entries:
@@ -232,7 +246,8 @@ async def top10_view(interaction, position):
 @app_commands.describe(position="Position", rank="Rank (1-10)", player_name="Player name",
     rating="Rating (e.g., 117 OVR)", image="Card image")
 @app_commands.choices(position=ALL_POSITIONS)
-async def top10_add(interaction, position, rank, player_name, rating, image):
+async def top10_add(interaction: discord.Interaction, position: str, rank: int,
+    player_name: str, rating: str, image: discord.Attachment):
     if not can_edit_top10(interaction.user.id):
         await interaction.response.send_message("❌ No permission!", ephemeral=True); return
     if rank < 1 or rank > 10:
@@ -245,7 +260,7 @@ async def top10_add(interaction, position, rank, player_name, rating, image):
 @bot.tree.command(name="top10_remove", description="Remove player (Owner/Admin)")
 @app_commands.describe(position="Position", rank="Rank to remove")
 @app_commands.choices(position=ALL_POSITIONS)
-async def top10_remove(interaction, position, rank):
+async def top10_remove(interaction: discord.Interaction, position: str, rank: int):
     if not can_edit_top10(interaction.user.id):
         await interaction.response.send_message("❌ No permission!", ephemeral=True); return
     if top10_db.remove_top10_entry(position, rank):
@@ -255,7 +270,7 @@ async def top10_remove(interaction, position, rank):
 @bot.tree.command(name="top10_swap", description="Swap two ranks (Owner/Admin)")
 @app_commands.describe(position="Position", rank1="First rank", rank2="Second rank")
 @app_commands.choices(position=ALL_POSITIONS)
-async def top10_swap(interaction, position, rank1, rank2):
+async def top10_swap(interaction: discord.Interaction, position: str, rank1: int, rank2: int):
     if not can_edit_top10(interaction.user.id):
         await interaction.response.send_message("❌ No permission!", ephemeral=True); return
     if rank1 == rank2:
@@ -267,7 +282,7 @@ async def top10_swap(interaction, position, rank1, rank2):
 @bot.tree.command(name="top10_debug", description="Show raw entries (Owner)")
 @app_commands.describe(position="Position")
 @app_commands.choices(position=ALL_POSITIONS)
-async def top10_debug(interaction, position):
+async def top10_debug(interaction: discord.Interaction, position: str):
     if not is_bot_owner(interaction.user.id):
         await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
     entries = top10_db.get_top10(position)
@@ -280,7 +295,7 @@ async def top10_debug(interaction, position):
 @bot.tree.command(name="top10_clear", description="Clear all entries for a position (Owner)")
 @app_commands.describe(position="Position")
 @app_commands.choices(position=ALL_POSITIONS)
-async def top10_clear(interaction, position):
+async def top10_clear(interaction: discord.Interaction, position: str):
     if not is_bot_owner(interaction.user.id):
         await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
     for rank in range(1, 11): top10_db.remove_top10_entry(position, rank)
@@ -288,7 +303,7 @@ async def top10_clear(interaction, position):
 
 @bot.tree.command(name="top10_import", description="Import old top10.db into new 4+4+4 databases (Owner Only)")
 @app_commands.describe(old_db="Upload your old top10.db file")
-async def top10_import(interaction, old_db):
+async def top10_import(interaction: discord.Interaction, old_db: discord.Attachment):
     if not is_bot_owner(interaction.user.id):
         await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
     if not old_db.filename.endswith('.db'):
@@ -329,7 +344,7 @@ async def top10_import(interaction, old_db):
         old_conn.close()
         os.remove('_temp_import.db')
         
-        embed = discord.Embed(title="✅ Import Complete!", description=f"**{total}** entries imported across {len(positions)} positions.", color=0x2ecc71)
+        embed = discord.Embed(title="✅ Import Complete!", description=f"**{total}** entries imported.", color=0x2ecc71)
         embed.add_field(name="Details", value="\n".join(details[:12]), inline=False)
         embed.add_field(name="New Structure", value="• `top10_1.db` - GK, LB, RB, CB\n• `top10_2.db` - CM, CDM, CAM, LM\n• `top10_3.db` - RM, LW, RW, ST", inline=False)
         embed.set_footer(text="FELIX PR | Data imported successfully!")
@@ -346,7 +361,7 @@ async def top10_import(interaction, old_db):
 
 @bot.tree.command(name="search", description="Search reviews")
 @app_commands.describe(player_name="Player name")
-async def search_command(interaction, player_name):
+async def search_command(interaction: discord.Interaction, player_name: str):
     reviews = bot.db.get_all_reviews()
     matching = [r for r in reviews if player_name.lower() in r['player_name'].lower()]
     if not matching:
@@ -356,14 +371,14 @@ async def search_command(interaction, player_name):
 
 @bot.tree.command(name="assign_reviewer_role", description="Set reviewer role (Owner)")
 @app_commands.describe(role="Role for editing")
-async def assign_reviewer_role(interaction, role):
+async def assign_reviewer_role(interaction: discord.Interaction, role: discord.Role):
     if not is_bot_owner(interaction.user.id):
         await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
     config.set_reviewer_role_id(role.id)
     await interaction.response.send_message(f"✅ **{role.name}** can now edit reviews!")
 
 @bot.tree.command(name="check_reviewer_role", description="Check reviewer role (Owner)")
-async def check_reviewer_role(interaction):
+async def check_reviewer_role(interaction: discord.Interaction):
     if not is_bot_owner(interaction.user.id):
         await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
     role_id = config.get_reviewer_role_id()
@@ -374,7 +389,7 @@ async def check_reviewer_role(interaction):
     else: await interaction.response.send_message("❌ No role set!", ephemeral=True)
 
 @bot.tree.command(name="list_reviews", description="List all reviews")
-async def list_reviews(interaction):
+async def list_reviews(interaction: discord.Interaction):
     reviews = bot.db.get_all_reviews()
     if not reviews:
         await interaction.response.send_message("No reviews!", ephemeral=True); return
@@ -386,7 +401,7 @@ async def list_reviews(interaction):
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="backup", description="Download all data (Owner)")
-async def backup_command(interaction):
+async def backup_command(interaction: discord.Interaction):
     if not is_bot_owner(interaction.user.id):
         await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
     await interaction.response.defer(ephemeral=True)
@@ -406,8 +421,9 @@ async def backup_command(interaction):
 @bot.tree.command(name="restore", description="Restore from backup (Owner)")
 @app_commands.describe(reviews_file="fcm_reviews.db", top10_1_file="top10_1.db (opt)",
     top10_2_file="top10_2.db (opt)", top10_3_file="top10_3.db (opt)", config_file="bot_config.json (opt)")
-async def restore_command(interaction, reviews_file, top10_1_file=None, top10_2_file=None,
-    top10_3_file=None, config_file=None):
+async def restore_command(interaction: discord.Interaction, reviews_file: discord.Attachment,
+    top10_1_file: discord.Attachment = None, top10_2_file: discord.Attachment = None,
+    top10_3_file: discord.Attachment = None, config_file: discord.Attachment = None):
     if not is_bot_owner(interaction.user.id):
         await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
     await interaction.response.defer(ephemeral=True)
@@ -440,7 +456,7 @@ async def restore_command(interaction, reviews_file, top10_1_file=None, top10_2_
     await interaction.followup.send(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="dbcheck", description="Check database status (Owner)")
-async def dbcheck_command(interaction):
+async def dbcheck_command(interaction: discord.Interaction):
     if not is_bot_owner(interaction.user.id):
         await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
     await interaction.response.defer(ephemeral=True)
@@ -452,7 +468,7 @@ async def dbcheck_command(interaction):
     await interaction.followup.send(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="stats", description="Bot statistics")
-async def stats_command(interaction):
+async def stats_command(interaction: discord.Interaction):
     embed = discord.Embed(title="📊 FELIX PR Stats", color=0x2ecc71, timestamp=datetime.now())
     embed.add_field(name="Reviews", value=str(bot.db.get_review_count()), inline=True)
     rs = os.path.getsize('fcm_reviews.db')/1024 if os.path.exists('fcm_reviews.db') else 0
@@ -464,7 +480,7 @@ async def stats_command(interaction):
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="help", description="Show all commands")
-async def help_command(interaction):
+async def help_command(interaction: discord.Interaction):
     embed = discord.Embed(title="📚 FELIX PR - Help", color=0x8B5CF6, description="FC Mobile Player Review Bot")
     embed.add_field(name="⚽ `/review_outfield`", value="Create outfield review", inline=False)
     embed.add_field(name="🧤 `/review_gk`", value="Create GK review", inline=False)
