@@ -110,10 +110,10 @@ class Top10Poster:
         # Row 1: Rank 1 (center, large) - 1 card
         rank1 = next((e for e in entries if int(e.get('rank', 0)) == 1), None)
         if rank1:
-            self.draw_rank_card(rank1, 1, self.width//2, 290, 320, 320, '#FFD700', 7, True)
+            self.draw_rank_card(rank1, 1, self.width//2, 260, 320, 320, '#FFD700', 7, True)
         
         # Row 2: Ranks 2-3 - 2 cards
-        row2_y = 660
+        row2_y = 700
         row2_card_size = 240
         row2_gap = 40
         row2_total_w = 2 * row2_card_size + row2_gap
@@ -126,7 +126,7 @@ class Top10Poster:
                 self.draw_rank_card(entry, r, x + row2_card_size//2, row2_y, row2_card_size, row2_card_size, color, 5, True)
         
         # Row 3: Ranks 4-6 - 3 cards
-        row3_y = 970
+        row3_y = 1020
         row3_card_size = 190
         row3_gap = 35
         row3_total_w = 3 * row3_card_size + 2 * row3_gap
@@ -138,7 +138,7 @@ class Top10Poster:
                 self.draw_rank_card(entry, r, x + row3_card_size//2, row3_y, row3_card_size, row3_card_size, '#777777', 4, False)
         
         # Row 4: Ranks 7-10 - 4 cards
-        row4_y = 1240
+        row4_y = 1300
         row4_card_size = 160
         row4_gap = 25
         row4_total_w = 4 * row4_card_size + 3 * row4_gap
