@@ -32,14 +32,11 @@ def run_flask():
 
 # --- Self-Ping System (keeps bot alive on Render) ---
 async def self_ping():
-    """Ping the external URL every 14 minutes to prevent Render sleep"""
     await bot.wait_until_ready()
-    
     RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "")
     if not RENDER_URL:
         print("⚠️ RENDER_EXTERNAL_URL not set. Self-ping disabled.")
         return
-    
     while not bot.is_closed():
         await asyncio.sleep(840)
         try:
@@ -47,8 +44,6 @@ async def self_ping():
                 async with session.get(RENDER_URL) as response:
                     if response.status == 200:
                         print(f"🔄 Self-ping OK at {datetime.now().strftime('%H:%M:%S')}")
-                    else:
-                        print(f"⚠️ Self-ping status: {response.status}")
         except Exception as e:
             print(f"⚠️ Self-ping failed: {e}")
 
@@ -59,8 +54,8 @@ load_dotenv()
 BOT_OWNER_ID = 1214456066687893506
 
 ALLOWED_REVIEWERS = [
-    1214456066687893506,  # Bot Owner
-    553418145063239684,   # Other reviewer
+    1214456066687893506,
+    553418145063239684,
     1202544947161468969,
     773492040339292190,
     1284912012102598767,
@@ -73,27 +68,21 @@ CONFIG_FILE = "bot_config.json"
 class BotConfig:
     def __init__(self):
         self.data = self.load()
-    
     def load(self):
         if os.path.exists(CONFIG_FILE):
             with open(CONFIG_FILE, 'r') as f:
                 return json.load(f)
         return {"reviewer_role_id": None}
-    
     def save(self):
         with open(CONFIG_FILE, 'w') as f:
             json.dump(self.data, f)
-    
     def get_reviewer_role_id(self):
         return self.data.get("reviewer_role_id")
-    
     def set_reviewer_role_id(self, role_id):
         self.data["reviewer_role_id"] = role_id
         self.save()
 
 config = BotConfig()
-
-# Initialize Top 10 database and poster generator
 top10_db = Top10Database()
 poster_gen = Top10Poster()
 
@@ -109,49 +98,25 @@ class ReviewSelect(discord.ui.Select):
     def __init__(self, matching_reviews: list, db: Database, config):
         self.db = db
         self.config = config
-        
         options = []
         for review in matching_reviews[:25]:
             status = "✅" if review.get('verdict') != 'Pending' else "⏳"
             event_text = f" [{review.get('event', '')}]" if review.get('event') else ""
             label = f"{review['player_name']} {review['rating']}{event_text}"
-            if len(label) > 100:
-                label = label[:97] + "..."
-            
+            if len(label) > 100: label = label[:97] + "..."
             description = f"By: {review['reviewer_name']}"
-            if len(description) > 100:
-                description = description[:97] + "..."
-            
-            options.append(
-                discord.SelectOption(
-                    label=label,
-                    description=description,
-                    value=str(review['id']),
-                    emoji=status
-                )
-            )
-        
-        super().__init__(
-            placeholder="Select a review to view...",
-            min_values=1,
-            max_values=1,
-            options=options
-        )
+            if len(description) > 100: description = description[:97] + "..."
+            options.append(discord.SelectOption(label=label, description=description, value=str(review['id']), emoji=status))
+        super().__init__(placeholder="Select a review to view...", min_values=1, max_values=1, options=options)
     
     async def callback(self, interaction: discord.Interaction):
         review_id = int(self.values[0])
         review = self.db.get_review(review_id)
-        
         if not review:
-            await interaction.response.send_message(
-                "❌ Review not found! It may have been deleted.",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Review not found!", ephemeral=True)
             return
-        
         embed, file = create_review_embed(review)
         view = ReviewEditView(review_id, self.db, self.config, interaction.user)
-        
         if file:
             await interaction.response.edit_message(embed=embed, attachments=[file], view=view)
         else:
@@ -162,17 +127,14 @@ class FCMReviewBot(commands.Bot):
         intents = discord.Intents.default()
         intents.message_content = True
         intents.members = True
-        
         super().__init__(command_prefix='!', intents=intents)
         self.db = Database()
-    
     async def setup_hook(self):
         await self.tree.sync()
         print(f"Synced commands for {self.user}")
 
 bot = FCMReviewBot()
 
-# === PERMISSION CHECK FUNCTIONS ===
 def is_allowed_reviewer(user_id: int) -> bool:
     return user_id in ALLOWED_REVIEWERS
 
@@ -182,773 +144,393 @@ def is_bot_owner(user_id: int) -> bool:
 def can_edit_top10(user_id: int) -> bool:
     return user_id == BOT_OWNER_ID or user_id in [553418145063239684]
 
-# === BOT EVENTS ===
 @bot.event
 async def on_ready():
-    print(f'✅ Logged in as {bot.user} (ID: {bot.user.id})')
-    print(f'📊 Total reviews in database: {bot.db.get_review_count()}')
-    print(f'👑 Bot Owner ID: {BOT_OWNER_ID}')
-    print(f'📝 Allowed Reviewers: {ALLOWED_REVIEWERS}')
-    print(f'🏆 Top 10 System: Active (Poster Mode)')
-    reviewer_role = config.get_reviewer_role_id()
-    if reviewer_role:
-        print(f'🎭 Reviewer Role ID: {reviewer_role}')
-    print(f'🔄 Self-ping system: Active (every 14 minutes)')
-    print('------')
-    
+    print(f'✅ Logged in as {bot.user}')
+    print(f'📊 Reviews: {bot.db.get_review_count()}')
+    print(f'🏆 Top 10: Active (4+4+4 DB Split)')
     bot.loop.create_task(self_ping())
 
 # =============================================
-# === OUTFIELD PLAYER REVIEW COMMAND ===
+# === REVIEW COMMANDS ===
 # =============================================
+
 @bot.tree.command(name="review_outfield", description="Create a review for an outfield player (Restricted)")
 @app_commands.describe(
-    player_name="Name of the player (e.g., Kylian Mbappé)",
-    rating="Overall rating (e.g., 97 OVR)",
-    event="Event/Promo name (e.g., TOTY, TOTS, UCL, Hero, Icon)",
-    pace="PACE stat (e.g., 97)",
-    shooting="SHOOTING stat (e.g., 94)",
-    passing="PASSING stat (e.g., 88)",
-    dribbling="DRIBBLING stat (e.g., 95)",
-    defending="DEFENDING stat (e.g., 40)",
-    physical="PHYSICAL stat (e.g., 78)",
-    skill_move="Skill Move stars (1-5)",
-    weak_foot="Weak Foot stars (1-5)",
-    strong_foot="Strong Foot (Left or Right)",
-    skill_points="Skill Points (e.g., 2X Attacking Midfielder, 2X Playmaker, 1X Dribbling)",
-    image="Upload the player card image"
+    player_name="Player name", rating="Overall rating (e.g., 97 OVR)",
+    event="Event/Promo name", pace="PACE", shooting="SHOOTING",
+    passing="PASSING", dribbling="DRIBBLING", defending="DEFENDING",
+    physical="PHYSICAL", skill_move="Skill Move (1-5)", weak_foot="Weak Foot (1-5)",
+    strong_foot="Strong Foot", skill_points="Skill Points", image="Player card image"
 )
 @app_commands.choices(
-    skill_move=[
-        app_commands.Choice(name="1 ★", value=1),
-        app_commands.Choice(name="2 ★★", value=2),
-        app_commands.Choice(name="3 ★★★", value=3),
-        app_commands.Choice(name="4 ★★★★", value=4),
-        app_commands.Choice(name="5 ★★★★★", value=5),
-    ],
-    weak_foot=[
-        app_commands.Choice(name="1 ★", value=1),
-        app_commands.Choice(name="2 ★★", value=2),
-        app_commands.Choice(name="3 ★★★", value=3),
-        app_commands.Choice(name="4 ★★★★", value=4),
-        app_commands.Choice(name="5 ★★★★★", value=5),
-    ],
-    strong_foot=[
-        app_commands.Choice(name="Left", value="Left"),
-        app_commands.Choice(name="Right", value="Right"),
-    ]
+    skill_move=[app_commands.Choice(name=f"{i} ★", value=i) for i in range(1,6)],
+    weak_foot=[app_commands.Choice(name=f"{i} ★", value=i) for i in range(1,6)],
+    strong_foot=[app_commands.Choice(name="Left", value="Left"), app_commands.Choice(name="Right", value="Right")]
 )
-async def review_outfield(
-    interaction: discord.Interaction,
-    player_name: str,
-    rating: str,
-    event: str,
-    pace: str,
-    shooting: str,
-    passing: str,
-    dribbling: str,
-    defending: str,
-    physical: str,
-    skill_move: int,
-    weak_foot: int,
-    strong_foot: str,
-    skill_points: str = "",
-    image: discord.Attachment = None
-):
+async def review_outfield(interaction: discord.Interaction, player_name: str, rating: str, event: str,
+    pace: str, shooting: str, passing: str, dribbling: str, defending: str, physical: str,
+    skill_move: int, weak_foot: int, strong_foot: str, skill_points: str = "", image: discord.Attachment = None):
     if not is_allowed_reviewer(interaction.user.id):
-        await interaction.response.send_message(
-            "❌ **Permission Denied**\nYou are not authorized to create reviews.",
-            ephemeral=True
-        )
-        return
-    
+        await interaction.response.send_message("❌ Not authorized!", ephemeral=True); return
     await interaction.response.defer()
-    
     stats_display = f"**PAC:** {pace} | **SHO:** {shooting} | **PAS:** {passing}\n**DRI:** {dribbling} | **DEF:** {defending} | **PHY:** {physical}"
     image_url = image.url if image else None
-    
-    review_id = bot.db.add_review(
-        player_name=player_name,
-        rating=rating,
-        image_url=image_url,
-        base_stats=stats_display,
-        reviewer_id=str(interaction.user.id),
-        reviewer_name=interaction.user.display_name,
-        event=event,
-        skill_move=skill_move,
-        weak_foot=weak_foot,
-        strong_foot=strong_foot,
-        skill_points=skill_points
-    )
-    
+    review_id = bot.db.add_review(player_name, rating, image_url, stats_display, str(interaction.user.id), interaction.user.display_name, event, skill_move, weak_foot, strong_foot, skill_points)
     review = bot.db.get_review(review_id)
     embed, file = create_review_embed(review)
     view = ReviewEditView(review_id, bot.db, config, interaction.user)
-    
-    if file:
-        await interaction.followup.send(embed=embed, file=file, view=view)
-    else:
-        await interaction.followup.send(embed=embed, view=view)
+    if file: await interaction.followup.send(embed=embed, file=file, view=view)
+    else: await interaction.followup.send(embed=embed, view=view)
 
-# =============================================
-# === GOALKEEPER REVIEW COMMAND ===
-# =============================================
 @bot.tree.command(name="review_gk", description="Create a review for a goalkeeper (Restricted)")
 @app_commands.describe(
-    player_name="Name of the goalkeeper (e.g., Thibaut Courtois)",
-    rating="Overall rating (e.g., 96 OVR)",
-    event="Event/Promo name (e.g., TOTY, TOTS, UCL, Hero, Icon)",
-    diving="DIVING stat (e.g., 95)",
-    positioning="POSITIONING stat (e.g., 92)",
-    handling="HANDLING stat (e.g., 90)",
-    reflexes="REFLEXES stat (e.g., 93)",
-    kicking="KICKING stat (e.g., 85)",
-    physical="PHYSICAL stat (e.g., 88)",
-    skill_move="Skill Move stars (1-5)",
-    weak_foot="Weak Foot stars (1-5)",
-    strong_foot="Strong Foot (Left or Right)",
-    skill_points="Skill Points (e.g., 2X Diving, 2X Reflexes, 1X Handling)",
-    image="Upload the player card image"
+    player_name="Player name", rating="Overall rating (e.g., 96 OVR)",
+    event="Event/Promo name", diving="DIVING", positioning="POSITIONING",
+    handling="HANDLING", reflexes="REFLEXES", kicking="KICKING",
+    physical="PHYSICAL", skill_move="Skill Move (1-5)", weak_foot="Weak Foot (1-5)",
+    strong_foot="Strong Foot", skill_points="Skill Points", image="Player card image"
 )
 @app_commands.choices(
-    skill_move=[
-        app_commands.Choice(name="1 ★", value=1),
-        app_commands.Choice(name="2 ★★", value=2),
-        app_commands.Choice(name="3 ★★★", value=3),
-        app_commands.Choice(name="4 ★★★★", value=4),
-        app_commands.Choice(name="5 ★★★★★", value=5),
-    ],
-    weak_foot=[
-        app_commands.Choice(name="1 ★", value=1),
-        app_commands.Choice(name="2 ★★", value=2),
-        app_commands.Choice(name="3 ★★★", value=3),
-        app_commands.Choice(name="4 ★★★★", value=4),
-        app_commands.Choice(name="5 ★★★★★", value=5),
-    ],
-    strong_foot=[
-        app_commands.Choice(name="Left", value="Left"),
-        app_commands.Choice(name="Right", value="Right"),
-    ]
+    skill_move=[app_commands.Choice(name=f"{i} ★", value=i) for i in range(1,6)],
+    weak_foot=[app_commands.Choice(name=f"{i} ★", value=i) for i in range(1,6)],
+    strong_foot=[app_commands.Choice(name="Left", value="Left"), app_commands.Choice(name="Right", value="Right")]
 )
-async def review_gk(
-    interaction: discord.Interaction,
-    player_name: str,
-    rating: str,
-    event: str,
-    diving: str,
-    positioning: str,
-    handling: str,
-    reflexes: str,
-    kicking: str,
-    physical: str,
-    skill_move: int,
-    weak_foot: int,
-    strong_foot: str,
-    skill_points: str = "",
-    image: discord.Attachment = None
-):
+async def review_gk(interaction: discord.Interaction, player_name: str, rating: str, event: str,
+    diving: str, positioning: str, handling: str, reflexes: str, kicking: str, physical: str,
+    skill_move: int, weak_foot: int, strong_foot: str, skill_points: str = "", image: discord.Attachment = None):
     if not is_allowed_reviewer(interaction.user.id):
-        await interaction.response.send_message(
-            "❌ **Permission Denied**\nYou are not authorized to create reviews.",
-            ephemeral=True
-        )
-        return
-    
+        await interaction.response.send_message("❌ Not authorized!", ephemeral=True); return
     await interaction.response.defer()
-    
     stats_display = f"**DIV:** {diving} | **POS:** {positioning} | **HAN:** {handling}\n**REF:** {reflexes} | **KIC:** {kicking} | **PHY:** {physical}"
     image_url = image.url if image else None
-    
-    review_id = bot.db.add_review(
-        player_name=player_name,
-        rating=rating,
-        image_url=image_url,
-        base_stats=stats_display,
-        reviewer_id=str(interaction.user.id),
-        reviewer_name=interaction.user.display_name,
-        event=event,
-        skill_move=skill_move,
-        weak_foot=weak_foot,
-        strong_foot=strong_foot,
-        skill_points=skill_points
-    )
-    
+    review_id = bot.db.add_review(player_name, rating, image_url, stats_display, str(interaction.user.id), interaction.user.display_name, event, skill_move, weak_foot, strong_foot, skill_points)
     review = bot.db.get_review(review_id)
     embed, file = create_review_embed(review)
     view = ReviewEditView(review_id, bot.db, config, interaction.user)
-    
-    if file:
-        await interaction.followup.send(embed=embed, file=file, view=view)
-    else:
-        await interaction.followup.send(embed=embed, view=view)
+    if file: await interaction.followup.send(embed=embed, file=file, view=view)
+    else: await interaction.followup.send(embed=embed, view=view)
 
-# =============================================
-# === UPDATE IMAGE COMMAND ===
-# =============================================
-@bot.tree.command(name="update_image", description="Update the card image for an existing review (Owner Only)")
-@app_commands.describe(
-    review_id="The ID of the review to update",
-    image="Upload the new player card image"
-)
-async def update_image(
-    interaction: discord.Interaction,
-    review_id: int,
-    image: discord.Attachment
-):
+@bot.tree.command(name="update_image", description="Update card image for a review (Owner Only)")
+@app_commands.describe(review_id="Review ID", image="New card image")
+async def update_image(interaction: discord.Interaction, review_id: int, image: discord.Attachment):
     if not is_bot_owner(interaction.user.id):
-        await interaction.response.send_message(
-            "❌ **Permission Denied**\nOnly the bot owner can use this command.",
-            ephemeral=True
-        )
-        return
-    
+        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
     await interaction.response.defer(ephemeral=True)
-    
     review = bot.db.get_review(review_id)
     if not review:
-        await interaction.followup.send(f"❌ Review `{review_id}` not found!", ephemeral=True)
-        return
-    
-    success = bot.db.update_image(review_id, image.url)
-    
-    if success:
-        embed = discord.Embed(
-            title="✅ Image Updated!",
-            description=f"Card image for review `{review_id}` (**{review['player_name']} {review['rating']}**) has been updated and stored permanently.",
-            color=discord.Color.green()
-        )
-        embed.set_footer(text="The image will no longer expire!")
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await interaction.followup.send(f"❌ Review `{review_id}` not found!", ephemeral=True); return
+    if bot.db.update_image(review_id, image.url):
+        await interaction.followup.send(f"✅ Image updated for review `{review_id}`!", ephemeral=True)
     else:
-        await interaction.followup.send(f"❌ Failed to update image for review `{review_id}`. Check logs.", ephemeral=True)
+        await interaction.followup.send("❌ Failed to update image!", ephemeral=True)
 
 # =============================================
 # === TOP 10 COMMANDS ===
 # =============================================
 
-ALL_POSITIONS = [
-    app_commands.Choice(name="GK - Goalkeeper", value="GK"),
-    app_commands.Choice(name="LB - Left Back", value="LB"),
-    app_commands.Choice(name="RB - Right Back", value="RB"),
-    app_commands.Choice(name="CB - Center Back", value="CB"),
-    app_commands.Choice(name="CM - Center Midfielder", value="CM"),
-    app_commands.Choice(name="CDM - Defensive Midfielder", value="CDM"),
-    app_commands.Choice(name="CAM - Attacking Midfielder", value="CAM"),
-    app_commands.Choice(name="LM - Left Midfielder", value="LM"),
-    app_commands.Choice(name="RM - Right Midfielder", value="RM"),
-    app_commands.Choice(name="LW - Left Winger", value="LW"),
-    app_commands.Choice(name="RW - Right Winger", value="RW"),
-    app_commands.Choice(name="ST - Striker", value="ST"),
-]
+ALL_POSITIONS = [app_commands.Choice(name=f"{p[0]} - {p[1]}", value=p[0]) for p in [
+    ("GK","Goalkeeper"),("LB","Left Back"),("RB","Right Back"),("CB","Center Back"),
+    ("CM","Center Midfielder"),("CDM","Defensive Midfielder"),("CAM","Attacking Midfielder"),
+    ("LM","Left Midfielder"),("RM","Right Midfielder"),("LW","Left Winger"),
+    ("RW","Right Winger"),("ST","Striker")
+]]
 
-@bot.tree.command(name="top10", description="View the Top 10 poster with all player card images")
-@app_commands.describe(position="Select the position")
+@bot.tree.command(name="top10", description="View Top 10 poster with card images")
+@app_commands.describe(position="Select position")
 @app_commands.choices(position=ALL_POSITIONS)
 async def top10_view(interaction: discord.Interaction, position: str):
-    """Generate and send the Top 10 poster"""
     await interaction.response.defer()
-    
-    position_names = {
-        "GK": "Goalkeeper", "LB": "Left Back", "RB": "Right Back", "CB": "Center Back",
-        "CM": "Center Midfielder", "CDM": "Defensive Midfielder", "CAM": "Attacking Midfielder",
-        "LM": "Left Midfielder", "RM": "Right Midfielder", "LW": "Left Winger",
-        "RW": "Right Winger", "ST": "Striker"
-    }
-    
+    pn = {"GK":"Goalkeeper","LB":"Left Back","RB":"Right Back","CB":"Center Back",
+          "CM":"Center Midfielder","CDM":"Defensive Midfielder","CAM":"Attacking Midfielder",
+          "LM":"Left Midfielder","RM":"Right Midfielder","LW":"Left Winger",
+          "RW":"Right Winger","ST":"Striker"}
     entries = top10_db.get_top10(position)
-    
     if not entries:
-        embed = discord.Embed(
-            title=f"🏆 Top 10 {position_names.get(position, position)}",
-            description="No players added yet! Use `/top10_add` to add players.",
-            color=0xF5A623
-        )
-        embed.set_footer(text="FELIX PR | Top 10 Leaderboard")
-        await interaction.followup.send(embed=embed)
+        await interaction.followup.send(embed=discord.Embed(title=f"🏆 Top 10 {pn.get(position, position)}", description="No players yet! Use `/top10_add`.", color=0xF5A623).set_footer(text="FELIX PR"))
         return
-    
     try:
-        poster_bytes = poster_gen.generate(entries, position, position_names.get(position, position))
+        poster_bytes = poster_gen.generate(entries, position, pn.get(position, position))
         poster_file = discord.File(poster_bytes, filename=f"top10_{position}.png")
-        
-        embed = discord.Embed(
-            title=f"🏆 Top 10 {position_names.get(position, position)}",
-            color=0xF5A623
-        )
+        embed = discord.Embed(title=f"🏆 Top 10 {pn.get(position, position)}", color=0xF5A623)
         embed.set_image(url=f"attachment://top10_{position}.png")
-        embed.set_footer(text="FELIX PR | Top 10 Leaderboard • Updated weekly")
-        
+        embed.set_footer(text="FELIX PR | Updated weekly")
         await interaction.followup.send(embed=embed, file=poster_file)
     except Exception as e:
-        print(f"❌ Poster generation error: {e}")
-        await interaction.followup.send(f"❌ Error generating poster. Make sure assets are uploaded.\nDetails: {e}")
+        await interaction.followup.send(f"❌ Error: {e}")
 
-@bot.tree.command(name="top10_add", description="Add/Update a player in the Top 10 (Owner/Admin Only)")
-@app_commands.describe(
-    position="Position to add to",
-    rank="Rank number (1-10)",
-    player_name="Player name",
-    rating="Player rating (e.g., 117 OVR)",
-    image="Upload the player card image"
-)
+@bot.tree.command(name="top10_add", description="Add player to Top 10 (Owner/Admin)")
+@app_commands.describe(position="Position", rank="Rank (1-10)", player_name="Player name", rating="Rating (e.g., 117 OVR)", image="Card image")
 @app_commands.choices(position=ALL_POSITIONS)
-async def top10_add(
-    interaction: discord.Interaction,
-    position: str,
-    rank: int,
-    player_name: str,
-    rating: str,
-    image: discord.Attachment
-):
+async def top10_add(interaction: discord.Interaction, position: str, rank: int, player_name: str, rating: str, image: discord.Attachment):
     if not can_edit_top10(interaction.user.id):
-        await interaction.response.send_message("❌ You don't have permission to edit the Top 10!", ephemeral=True)
+        await interaction.response.send_message("❌ No permission!", ephemeral=True); return
+    if rank < 1 or rank > 10:
+        await interaction.response.send_message("❌ Rank 1-10!", ephemeral=True); return
+    await interaction.response.defer(ephemeral=True)
+    if top10_db.add_top10_entry(position, rank, player_name, "", rating, image.url, interaction.user.name):
+        await interaction.followup.send(f"✅ **{player_name}** added to {position} #{rank}!", ephemeral=True)
+    else:
+        await interaction.followup.send("❌ Failed!", ephemeral=True)
+
+@bot.tree.command(name="top10_remove", description="Remove player from Top 10 (Owner/Admin)")
+@app_commands.describe(position="Position", rank="Rank to remove")
+@app_commands.choices(position=ALL_POSITIONS)
+async def top10_remove(interaction: discord.Interaction, position: str, rank: int):
+    if not can_edit_top10(interaction.user.id):
+        await interaction.response.send_message("❌ No permission!", ephemeral=True); return
+    if top10_db.remove_top10_entry(position, rank):
+        await interaction.response.send_message(f"✅ Removed #{rank} from {position}!", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"❌ No player at #{rank}!", ephemeral=True)
+
+@bot.tree.command(name="top10_swap", description="Swap two ranks (Owner/Admin)")
+@app_commands.describe(position="Position", rank1="First rank", rank2="Second rank")
+@app_commands.choices(position=ALL_POSITIONS)
+async def top10_swap(interaction: discord.Interaction, position: str, rank1: int, rank2: int):
+    if not can_edit_top10(interaction.user.id):
+        await interaction.response.send_message("❌ No permission!", ephemeral=True); return
+    if rank1 == rank2:
+        await interaction.response.send_message("❌ Same rank!", ephemeral=True); return
+    if top10_db.swap_top10_entries(position, rank1, rank2):
+        await interaction.response.send_message(f"✅ Swapped #{rank1} & #{rank2}!", ephemeral=True)
+    else:
+        await interaction.response.send_message("❌ Failed!", ephemeral=True)
+
+@bot.tree.command(name="top10_debug", description="Show raw entries (Owner)")
+@app_commands.describe(position="Position")
+@app_commands.choices(position=ALL_POSITIONS)
+async def top10_debug(interaction: discord.Interaction, position: str):
+    if not is_bot_owner(interaction.user.id):
+        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
+    entries = top10_db.get_top10(position)
+    if not entries:
+        await interaction.response.send_message(f"❌ No entries in {position}", ephemeral=True); return
+    text = f"**{position} - {len(entries)} entries:**\n"
+    for e in entries: text += f"Rank `{e['rank']}`: **{e['player_name']}** ({e['rating']})\n"
+    await interaction.response.send_message(text, ephemeral=True)
+
+@bot.tree.command(name="top10_clear", description="Clear all entries for a position (Owner)")
+@app_commands.describe(position="Position")
+@app_commands.choices(position=ALL_POSITIONS)
+async def top10_clear(interaction: discord.Interaction, position: str):
+    if not is_bot_owner(interaction.user.id):
+        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
+    for rank in range(1, 11): top10_db.remove_top10_entry(position, rank)
+    await interaction.response.send_message(f"✅ Cleared {position}!", ephemeral=True)
+
+@bot.tree.command(name="top10_migrate", description="Migrate old top10.db to new 4+4+4 split databases (Owner Only)")
+async def top10_migrate(interaction: discord.Interaction):
+    if not is_bot_owner(interaction.user.id):
+        await interaction.response.send_message("❌ Owner only!", ephemeral=True)
         return
     
-    if rank < 1 or rank > 10:
-        await interaction.response.send_message("❌ Rank must be between 1 and 10!", ephemeral=True)
+    if not os.path.exists('top10.db'):
+        await interaction.response.send_message("❌ No old `top10.db` found! Nothing to migrate.", ephemeral=True)
         return
     
     await interaction.response.defer(ephemeral=True)
     
-    success = top10_db.add_top10_entry(position, rank, player_name, "", rating, image.url, interaction.user.name)
+    positions = ['GK', 'LB', 'RB', 'CB', 'CM', 'CDM', 'CAM', 'LM', 'RM', 'LW', 'RW', 'ST']
+    migrated = 0
     
-    if success:
+    try:
+        old_conn = sqlite3.connect('top10.db')
+        old_conn.row_factory = sqlite3.Row
+        
+        for position in positions:
+            try:
+                cursor = old_conn.cursor()
+                cursor.execute(f"SELECT * FROM top10_{position} ORDER BY CAST(rank AS INTEGER)")
+                rows = cursor.fetchall()
+                
+                for row in rows:
+                    top10_db.add_top10_entry(
+                        position=position,
+                        rank=row['rank'],
+                        player_name=row['player_name'],
+                        card_name=row['card_name'] if row['card_name'] else "",
+                        rating=row['rating'],
+                        image_url=row['image_url'] if row['image_url'] else "",
+                        updated_by=row['updated_by'] if row['updated_by'] else "migration"
+                    )
+                    migrated += 1
+            except Exception as e:
+                print(f"⚠️ Skipped {position}: {e}")
+        
+        old_conn.close()
+        
+        # Rename old database as backup
+        os.rename('top10.db', 'top10_old_backup.db')
+        
         embed = discord.Embed(
-            title="✅ Top 10 Updated!",
-            description=f"**{player_name}** added to **{position}** at rank **#{rank}**",
+            title="✅ Migration Complete!",
+            description=f"**{migrated}** entries migrated from old database.\nOld file renamed to `top10_old_backup.db`",
             color=discord.Color.green()
         )
-        embed.add_field(name="Rating", value=rating, inline=True)
-        embed.set_footer(text=f"Updated by {interaction.user.name}")
+        embed.add_field(name="New Structure", value="• `top10_1.db` - GK, LB, RB, CB\n• `top10_2.db` - CM, CDM, CAM, LM\n• `top10_3.db` - RM, LW, RW, ST", inline=False)
+        embed.set_footer(text="Old backup kept as top10_old_backup.db - delete when ready")
         await interaction.followup.send(embed=embed, ephemeral=True)
-    else:
-        await interaction.followup.send("❌ Failed to add player!", ephemeral=True)
-
-@bot.tree.command(name="top10_remove", description="Remove a player from the Top 10 (Owner/Admin Only)")
-@app_commands.describe(
-    position="Position to remove from",
-    rank="Rank number to remove (1-10)"
-)
-@app_commands.choices(position=ALL_POSITIONS)
-async def top10_remove(interaction: discord.Interaction, position: str, rank: int):
-    if not can_edit_top10(interaction.user.id):
-        await interaction.response.send_message("❌ You don't have permission!", ephemeral=True)
-        return
-    
-    success = top10_db.remove_top10_entry(position, rank)
-    
-    if success:
-        await interaction.response.send_message(f"✅ Removed rank **#{rank}** from **{position}** Top 10!", ephemeral=True)
-    else:
-        await interaction.response.send_message(f"❌ No player at rank **#{rank}** in **{position}**!", ephemeral=True)
-
-@bot.tree.command(name="top10_swap", description="Swap two ranks in the Top 10 (Owner/Admin Only)")
-@app_commands.describe(
-    position="Position to swap in",
-    rank1="First rank",
-    rank2="Second rank"
-)
-@app_commands.choices(position=ALL_POSITIONS)
-async def top10_swap(interaction: discord.Interaction, position: str, rank1: int, rank2: int):
-    if not can_edit_top10(interaction.user.id):
-        await interaction.response.send_message("❌ You don't have permission!", ephemeral=True)
-        return
-    
-    if rank1 == rank2:
-        await interaction.response.send_message("❌ Cannot swap the same rank!", ephemeral=True)
-        return
-    
-    success = top10_db.swap_top10_entries(position, rank1, rank2)
-    
-    if success:
-        await interaction.response.send_message(f"✅ Swapped rank **#{rank1}** and **#{rank2}** in **{position}**!", ephemeral=True)
-    else:
-        await interaction.response.send_message("❌ Failed to swap! Make sure both ranks have players.", ephemeral=True)
-
-@bot.tree.command(name="top10_debug", description="Debug Top 10 - shows raw database entries (Owner Only)")
-@app_commands.describe(position="Position to check")
-@app_commands.choices(position=ALL_POSITIONS)
-async def top10_debug(interaction: discord.Interaction, position: str):
-    if not is_bot_owner(interaction.user.id):
-        await interaction.response.send_message("❌ Owner only!", ephemeral=True)
-        return
-    
-    entries = top10_db.get_top10(position)
-    
-    if not entries:
-        await interaction.response.send_message(f"❌ No entries in {position}", ephemeral=True)
-        return
-    
-    text = f"**{position} - {len(entries)} entries found:**\n"
-    for e in entries:
-        text += f"Rank `{e['rank']}`: **{e['player_name']}** ({e['rating']})\n"
-    
-    await interaction.response.send_message(text, ephemeral=True)
-
-@bot.tree.command(name="top10_clear", description="Clear all entries for a position (Owner Only)")
-@app_commands.describe(position="Position to clear")
-@app_commands.choices(position=ALL_POSITIONS)
-async def top10_clear(interaction: discord.Interaction, position: str):
-    if not is_bot_owner(interaction.user.id):
-        await interaction.response.send_message("❌ Owner only!", ephemeral=True)
-        return
-    
-    for rank in range(1, 11):
-        top10_db.remove_top10_entry(position, rank)
-    
-    await interaction.response.send_message(f"✅ Cleared all entries for **{position}**. Now re-add players with `/top10_add`.", ephemeral=True)
+        
+    except Exception as e:
+        await interaction.followup.send(f"❌ Migration failed: {e}", ephemeral=True)
 
 # =============================================
 # === OTHER COMMANDS ===
 # =============================================
 
-@bot.tree.command(name="search", description="Search for a player review by name")
-@app_commands.describe(player_name="Name of the player to search for")
+@bot.tree.command(name="search", description="Search reviews by player name")
+@app_commands.describe(player_name="Player name")
 async def search_command(interaction: discord.Interaction, player_name: str):
     reviews = bot.db.get_all_reviews()
-    
-    matching_reviews = [
-        r for r in reviews 
-        if player_name.lower() in r['player_name'].lower()
-    ]
-    
-    if not matching_reviews:
-        await interaction.response.send_message(
-            f"❌ No reviews found for **{player_name}**",
-            ephemeral=True
-        )
-        return
-    
-    embed = discord.Embed(
-        title=f"🔍 Search Results for '{player_name}'",
-        description=f"Found **{len(matching_reviews)}** matching review(s).\nSelect one from the dropdown below:",
-        color=discord.Color.blue()
-    )
-    
-    view = ReviewSearchView(matching_reviews, bot.db, config)
-    await interaction.response.send_message(embed=embed, view=view, ephemeral=False)
+    matching = [r for r in reviews if player_name.lower() in r['player_name'].lower()]
+    if not matching:
+        await interaction.response.send_message(f"❌ No reviews for **{player_name}**", ephemeral=True); return
+    embed = discord.Embed(title=f"🔍 Search: '{player_name}'", description=f"Found **{len(matching)}** review(s). Select below:", color=0x3498db)
+    await interaction.response.send_message(embed=embed, view=ReviewSearchView(matching, bot.db, config), ephemeral=False)
 
-@bot.tree.command(name="assign_reviewer_role", description="Set the role that can edit reviews (Bot Owner Only)")
-@app_commands.describe(role="The role to assign for editing reviews")
+@bot.tree.command(name="assign_reviewer_role", description="Set reviewer role (Owner)")
+@app_commands.describe(role="Role for editing reviews")
 async def assign_reviewer_role(interaction: discord.Interaction, role: discord.Role):
     if not is_bot_owner(interaction.user.id):
-        await interaction.response.send_message(
-            "❌ **Permission Denied**\nOnly the bot owner can use this command.",
-            ephemeral=True
-        )
-        return
-    
+        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
     config.set_reviewer_role_id(role.id)
-    
-    embed = discord.Embed(
-        title="✅ Reviewer Role Set",
-        description=f"Users with the **{role.name}** role can now edit reviews.",
-        color=discord.Color.green()
-    )
-    embed.set_footer(text=f"Role ID: {role.id}")
-    await interaction.response.send_message(embed=embed)
+    await interaction.response.send_message(f"✅ **{role.name}** can now edit reviews!")
 
-@bot.tree.command(name="check_reviewer_role", description="Check the current reviewer role (Bot Owner Only)")
+@bot.tree.command(name="check_reviewer_role", description="Check current reviewer role (Owner)")
 async def check_reviewer_role(interaction: discord.Interaction):
     if not is_bot_owner(interaction.user.id):
-        await interaction.response.send_message(
-            "❌ **Permission Denied**\nOnly the bot owner can use this command.",
-            ephemeral=True
-        )
-        return
-    
+        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
     role_id = config.get_reviewer_role_id()
     if role_id:
         role = interaction.guild.get_role(role_id)
-        if role:
-            embed = discord.Embed(
-                title="🎭 Current Reviewer Role",
-                description=f"**Role:** {role.mention}\n**Name:** {role.name}\n**ID:** `{role.id}`",
-                color=discord.Color.blue()
-            )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-        else:
-            await interaction.response.send_message(
-                f"⚠️ Reviewer role ID `{role_id}` is saved but the role no longer exists in this server!\n"
-                "It may have been deleted. Use `/assign_reviewer_role` to set a new one.",
-                ephemeral=True
-            )
+        if role: await interaction.response.send_message(f"🎭 Reviewer role: **{role.name}** (`{role.id}`)", ephemeral=True)
+        else: await interaction.response.send_message("⚠️ Role deleted! Set new one.", ephemeral=True)
     else:
-        await interaction.response.send_message(
-            "❌ No reviewer role has been set yet.\nUse `/assign_reviewer_role @Role` to set one.",
-            ephemeral=True
-        )
+        await interaction.response.send_message("❌ No role set!", ephemeral=True)
 
-@bot.tree.command(name="list_reviews", description="List all reviews in the database")
+@bot.tree.command(name="list_reviews", description="List all reviews")
 async def list_reviews(interaction: discord.Interaction):
     reviews = bot.db.get_all_reviews()
-    
     if not reviews:
-        await interaction.response.send_message("No reviews found!", ephemeral=True)
-        return
-    
-    embed = discord.Embed(
-        title="📋 All Player Reviews",
-        color=discord.Color.blue(),
-        description=f"Total: {len(reviews)} reviews"
-    )
-    
-    for review in reviews[:25]:
-        status = "✅" if review.get('verdict') != 'Pending' else "⏳"
-        event_text = f" [{review.get('event', '')}]" if review.get('event') else ""
-        embed.add_field(
-            name=f"{status} {review['player_name']} {review['rating']}{event_text}",
-            value=f"ID: `{review['id']}` | By: {review['reviewer_name']}",
-            inline=False
-        )
-    
+        await interaction.response.send_message("No reviews!", ephemeral=True); return
+    embed = discord.Embed(title="📋 All Reviews", color=0x3498db, description=f"Total: {len(reviews)}")
+    for r in reviews[:25]:
+        s = "✅" if r.get('verdict') != 'Pending' else "⏳"
+        ev = f" [{r.get('event','')}]" if r.get('event') else ""
+        embed.add_field(name=f"{s} {r['player_name']} {r['rating']}{ev}", value=f"ID: `{r['id']}` | By: {r['reviewer_name']}", inline=False)
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="backup", description="Download all bot data for backup (Owner Only)")
+@bot.tree.command(name="backup", description="Download all data (Owner)")
 async def backup_command(interaction: discord.Interaction):
     if not is_bot_owner(interaction.user.id):
-        await interaction.response.send_message(
-            "❌ **Permission Denied**\nOnly the bot owner can use this command.",
-            ephemeral=True
-        )
-        return
-    
+        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
     await interaction.response.defer(ephemeral=True)
-    
-    files_to_send = []
-    
-    # Force commit before backup
     try:
-        conn = sqlite3.connect('fcm_reviews.db')
-        conn.commit()
-        conn.close()
-    except:
-        pass
-    
-    if os.path.exists('fcm_reviews.db') and os.path.getsize('fcm_reviews.db') > 0:
-        files_to_send.append(discord.File('fcm_reviews.db'))
-    
-    if os.path.exists('top10.db') and os.path.getsize('top10.db') > 0:
-        files_to_send.append(discord.File('top10.db'))
-    
-    if os.path.exists('bot_config.json'):
-        files_to_send.append(discord.File('bot_config.json'))
-    
+        conn = sqlite3.connect('fcm_reviews.db'); conn.commit(); conn.close()
+    except: pass
+    files_to_send = []
+    for f in ['fcm_reviews.db', 'top10_1.db', 'top10_2.db', 'top10_3.db', 'bot_config.json']:
+        if os.path.exists(f) and os.path.getsize(f) > 0:
+            files_to_send.append(discord.File(f))
     if not files_to_send:
-        await interaction.followup.send("❌ No files to backup!", ephemeral=True)
-        return
-    
-    embed = discord.Embed(
-        title="💾 Backup Complete",
-        description=f"**Time:** <t:{int(datetime.now().timestamp())}:F>\n**Reviews:** {bot.db.get_review_count()}",
-        color=discord.Color.green()
-    )
-    
-    file_list = [f"• {f.filename}" for f in files_to_send]
-    embed.add_field(name="Files", value="\n".join(file_list), inline=False)
-    embed.add_field(name="💡 Restore", value="Use `/restore` and attach the files", inline=False)
-    embed.set_footer(text="FCM Review Bot | Save these files!")
-    
+        await interaction.followup.send("❌ No files!", ephemeral=True); return
+    embed = discord.Embed(title="💾 Backup Complete", description=f"Reviews: {bot.db.get_review_count()}", color=0x2ecc71)
+    embed.add_field(name="Files", value="\n".join([f"• {f.filename}" for f in files_to_send]), inline=False)
+    embed.set_footer(text="FELIX PR | Use /restore to restore")
     await interaction.followup.send(embed=embed, files=files_to_send, ephemeral=True)
 
-@bot.tree.command(name="restore", description="Restore database from backup files (Owner Only)")
+@bot.tree.command(name="restore", description="Restore from backup (Owner)")
 @app_commands.describe(
-    db_file="The fcm_reviews.db backup file",
-    top10_file="The top10.db backup file (optional)",
-    config_file="The bot_config.json backup file (optional)"
+    reviews_file="fcm_reviews.db",
+    top10_1_file="top10_1.db (optional)",
+    top10_2_file="top10_2.db (optional)",
+    top10_3_file="top10_3.db (optional)",
+    config_file="bot_config.json (optional)"
 )
-async def restore_command(
-    interaction: discord.Interaction, 
-    db_file: discord.Attachment,
-    top10_file: discord.Attachment = None,
-    config_file: discord.Attachment = None
-):
+async def restore_command(interaction: discord.Interaction, reviews_file: discord.Attachment,
+    top10_1_file: discord.Attachment = None, top10_2_file: discord.Attachment = None,
+    top10_3_file: discord.Attachment = None, config_file: discord.Attachment = None):
     if not is_bot_owner(interaction.user.id):
-        await interaction.response.send_message(
-            "❌ **Permission Denied**\nOnly the bot owner can use this command.",
-            ephemeral=True
-        )
-        return
-    
+        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
     await interaction.response.defer(ephemeral=True)
-    
-    restored = []
-    failed = []
-    
-    if db_file.filename.endswith('.db'):
+    restored, failed = [], []
+    if reviews_file.filename.endswith('.db'):
         try:
-            file_data = await db_file.read()
-            with open('fcm_reviews.db', 'wb') as f:
-                f.write(file_data)
+            data = await reviews_file.read()
+            with open('fcm_reviews.db', 'wb') as f: f.write(data)
             bot.db = Database()
-            count = bot.db.get_review_count()
-            restored.append(f"✅ fcm_reviews.db ({count} reviews)")
-        except Exception as e:
-            failed.append(f"❌ fcm_reviews.db: {str(e)}")
-    else:
-        failed.append("❌ db_file must be a .db file")
-    
-    if top10_file and top10_file.filename.endswith('.db'):
-        try:
-            file_data = await top10_file.read()
-            with open('top10.db', 'wb') as f:
-                f.write(file_data)
-            restored.append("✅ top10.db")
-        except Exception as e:
-            failed.append(f"❌ top10.db: {str(e)}")
-    
+            restored.append(f"✅ fcm_reviews.db ({bot.db.get_review_count()} reviews)")
+        except Exception as e: failed.append(f"❌ fcm_reviews.db: {e}")
+    else: failed.append("❌ reviews_file must be .db")
+    for file_obj, name in [(top10_1_file,'top10_1.db'),(top10_2_file,'top10_2.db'),(top10_3_file,'top10_3.db')]:
+        if file_obj and file_obj.filename.endswith('.db'):
+            try:
+                data = await file_obj.read()
+                with open(name, 'wb') as f: f.write(data)
+                restored.append(f"✅ {name}")
+            except Exception as e: failed.append(f"❌ {name}: {e}")
     if config_file and config_file.filename.endswith('.json'):
         try:
-            file_data = await config_file.read()
-            with open('bot_config.json', 'wb') as f:
-                f.write(file_data)
+            data = await config_file.read()
+            with open('bot_config.json', 'wb') as f: f.write(data)
             restored.append("✅ bot_config.json")
-        except Exception as e:
-            failed.append(f"❌ bot_config.json: {str(e)}")
-    
-    embed = discord.Embed(
-        title="🔄 Restore Results",
-        color=discord.Color.green() if restored else discord.Color.red(),
-        timestamp=datetime.now()
-    )
-    
-    if restored:
-        embed.add_field(name="✅ Restored", value="\n".join(restored), inline=False)
-    if failed:
-        embed.add_field(name="❌ Failed", value="\n".join(failed), inline=False)
-    if restored:
-        embed.add_field(name="⚠️ Note", value="Restart recommended for full effect", inline=False)
-    
+        except Exception as e: failed.append(f"❌ bot_config.json: {e}")
+    embed = discord.Embed(title="🔄 Restore Results", color=0x2ecc71 if restored else 0xe74c3c)
+    if restored: embed.add_field(name="✅ Restored", value="\n".join(restored), inline=False)
+    if failed: embed.add_field(name="❌ Failed", value="\n".join(failed), inline=False)
+    if restored: embed.add_field(name="⚠️ Note", value="Restart for full effect", inline=False)
     await interaction.followup.send(embed=embed, ephemeral=True)
 
-@bot.tree.command(name="dbcheck", description="Check database status (Owner Only)")
+@bot.tree.command(name="dbcheck", description="Check database status (Owner)")
 async def dbcheck_command(interaction: discord.Interaction):
     if not is_bot_owner(interaction.user.id):
-        await interaction.response.send_message("❌ Owner only!", ephemeral=True)
-        return
-    
+        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
     await interaction.response.defer(ephemeral=True)
-    
-    embed = discord.Embed(title="🔍 Database Status", color=discord.Color.blue())
-    
-    for db_name in ['fcm_reviews.db', 'top10.db']:
-        exists = os.path.exists(db_name)
-        size = os.path.getsize(db_name) if exists else 0
-        embed.add_field(
-            name=f"📁 {db_name}",
-            value=f"Exists: {exists}\nSize: {size} bytes ({size/1024:.2f} KB)",
-            inline=True
-        )
-    
-    embed.add_field(name="Working Directory", value=f"`{os.getcwd()}`", inline=False)
-    
+    embed = discord.Embed(title="🔍 Database Status", color=0x3498db)
+    for db in ['fcm_reviews.db','top10_1.db','top10_2.db','top10_3.db']:
+        e = os.path.exists(db); s = os.path.getsize(db) if e else 0
+        embed.add_field(name=f"📁 {db}", value=f"Exists: {e}\nSize: {s:,} bytes ({s/1024:.1f} KB)", inline=True)
+    if os.path.exists('top10.db'):
+        s = os.path.getsize('top10.db')
+        embed.add_field(name="⚠️ top10.db (old)", value=f"Size: {s:,} bytes\nUse `/top10_migrate`", inline=True)
+    embed.add_field(name="📂 Working Dir", value=f"`{os.getcwd()}`", inline=False)
     await interaction.followup.send(embed=embed, ephemeral=True)
 
-@bot.tree.command(name="stats", description="Show bot statistics")
+@bot.tree.command(name="stats", description="Bot statistics")
 async def stats_command(interaction: discord.Interaction):
-    review_count = bot.db.get_review_count()
-    
-    embed = discord.Embed(
-        title="📊 FCM Review Bot Statistics",
-        color=discord.Color.green(),
-        timestamp=datetime.now()
-    )
-    embed.add_field(name="Total Reviews", value=str(review_count), inline=True)
-    
-    db_size = os.path.getsize('fcm_reviews.db') / 1024 if os.path.exists('fcm_reviews.db') else 0
-    embed.add_field(name="Reviews DB Size", value=f"{db_size:.2f} KB", inline=True)
-    embed.add_field(name="Latency", value=f"{round(bot.latency * 1000)}ms", inline=True)
-    
-    top10_size = os.path.getsize('top10.db') / 1024 if os.path.exists('top10.db') else 0
-    embed.add_field(name="Top 10 DB Size", value=f"{top10_size:.2f} KB", inline=True)
-    
+    embed = discord.Embed(title="📊 FELIX PR Stats", color=0x2ecc71, timestamp=datetime.now())
+    embed.add_field(name="Reviews", value=str(bot.db.get_review_count()), inline=True)
+    rs = os.path.getsize('fcm_reviews.db')/1024 if os.path.exists('fcm_reviews.db') else 0
+    embed.add_field(name="Reviews DB", value=f"{rs:.1f} KB", inline=True)
+    embed.add_field(name="Latency", value=f"{round(bot.latency*1000)}ms", inline=True)
+    for db in ['top10_1.db','top10_2.db','top10_3.db']:
+        s = os.path.getsize(db)/1024 if os.path.exists(db) else 0
+        embed.add_field(name=db, value=f"{s:.1f} KB", inline=True)
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="help", description="Show help for the review system")
+@bot.tree.command(name="help", description="Show all commands")
 async def help_command(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="📚 FCM Review Bot Help - FELIX PR",
-        description="Complete guide to using the review system",
-        color=discord.Color.blurple()
-    )
-    
-    embed.add_field(
-        name="⚽ `/review_outfield`",
-        value="Create a review for outfield players\n**Stats:** PAC, SHO, PAS, DRI, DEF, PHY",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="🧤 `/review_gk`",
-        value="Create a review for goalkeepers\n**Stats:** DIV, POS, HAN, REF, KIC, PHY",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="🏆 `/top10 <position>`",
-        value="Generate a poster-style Top 10 leaderboard with all card images",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="🔧 Top 10 Management",
-        value="`/top10_add` - Add player to Top 10\n`/top10_remove` - Remove player\n`/top10_swap` - Swap ranks",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="🖼️ `/update_image <id>`",
-        value="Update card image for an existing review (Owner only)",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="🔍 `/search <player>`",
-        value="Search for a player review by name",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="📋 `/list_reviews`",
-        value="Show all reviews in the database",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="✏️ Editing Reviews",
-        value="Buttons: Edit Pros | Edit Cons | Edit Verdict | Edit Alternatives",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="🎭 Role Management",
-        value="`/assign_reviewer_role @Role` | `/check_reviewer_role`",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="💾 `/backup` & `/restore`",
-        value="Download/restore all data including Top 10 (Owner only)",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="📊 `/stats` & `/dbcheck`",
-        value="View bot statistics and database status",
-        inline=False
-    )
-    
+    embed = discord.Embed(title="📚 FELIX PR - Help", color=0x8B5CF6, description="FC Mobile Player Review Bot")
+    embed.add_field(name="⚽ `/review_outfield`", value="Create outfield review", inline=False)
+    embed.add_field(name="🧤 `/review_gk`", value="Create GK review", inline=False)
+    embed.add_field(name="🏆 `/top10 <pos>`", value="View Top 10 poster", inline=False)
+    embed.add_field(name="🔧 Top 10 Mgmt", value="`/top10_add` `/top10_remove` `/top10_swap`\n`/top10_debug` `/top10_clear` `/top10_migrate`", inline=False)
+    embed.add_field(name="🖼️ `/update_image`", value="Update card image", inline=False)
+    embed.add_field(name="🔍 `/search`", value="Search reviews", inline=False)
+    embed.add_field(name="📋 `/list_reviews`", value="List all reviews", inline=False)
+    embed.add_field(name="💾 `/backup` & `/restore`", value="Backup/restore all data", inline=False)
+    embed.add_field(name="📊 `/stats` & `/dbcheck`", value="Statistics & diagnostics", inline=False)
+    embed.set_footer(text="FELIX PR | 4+4+4 DB Split")
     await interaction.response.send_message(embed=embed)
 
-# Run the bot
+# Run
 if __name__ == "__main__":
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
-    
     token = os.getenv('DISCORD_TOKEN')
     if not token:
-        print("❌ ERROR: No token found in .env file!")
+        print("❌ DISCORD_TOKEN not set!")
         exit(1)
-    
     bot.run(token)
