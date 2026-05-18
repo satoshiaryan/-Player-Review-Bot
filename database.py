@@ -18,7 +18,6 @@ class Database:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
-            # Reviews table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS reviews (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -72,8 +71,6 @@ class Database:
                    base_stats: str, reviewer_id: str, reviewer_name: str, 
                    event: str = "", skill_move: int = 0, weak_foot: int = 0, 
                    strong_foot: str = "", skill_points: str = "") -> int:
-        """Add a new review and return its ID"""
-        
         image_base64 = None
         if image_url:
             try:
@@ -81,7 +78,6 @@ class Database:
                 with urllib.request.urlopen(req, timeout=10) as response:
                     image_data = response.read()
                     image_base64 = base64.b64encode(image_data).decode('utf-8')
-                    print(f"✅ Downloaded & stored image: {len(image_data)} bytes")
             except Exception as e:
                 print(f"⚠️ Could not download image: {e}")
         
@@ -99,14 +95,9 @@ class Database:
         valid_fields = ['pros', 'cons', 'verdict', 'alternatives', 'event', 'skill_points']
         if field not in valid_fields:
             raise ValueError(f"Invalid field: {field}")
-        
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute(f'''
-                UPDATE reviews 
-                SET {field} = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            ''', (value, review_id))
+            cursor.execute(f"UPDATE reviews SET {field} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (value, review_id))
             conn.commit()
     
     def update_image(self, review_id: int, image_url: str) -> bool:
@@ -115,19 +106,13 @@ class Database:
             with urllib.request.urlopen(req, timeout=10) as response:
                 image_data = response.read()
                 image_base64 = base64.b64encode(image_data).decode('utf-8')
-                print(f"✅ Downloaded image for review {review_id}: {len(image_data)} bytes")
-            
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute('''
-                    UPDATE reviews 
-                    SET image_url = ?, image_data = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                ''', (image_url, image_base64, review_id))
+                cursor.execute('UPDATE reviews SET image_url = ?, image_data = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', (image_url, image_base64, review_id))
                 conn.commit()
-                return True
+            return True
         except Exception as e:
-            print(f"❌ Failed to update image for review {review_id}: {e}")
+            print(f"❌ Failed to update image: {e}")
             return False
     
     def get_review(self, review_id: int) -> Optional[Dict[str, Any]]:
@@ -153,57 +138,31 @@ class Database:
             return cursor.rowcount > 0
     
     def create_backup(self, backup_path: str = None) -> str:
-        """Create a backup using direct file copy (fast, no timeout)"""
         if not backup_path:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_path = f"backup_{timestamp}.db"
-        
-        # Force commit any pending changes
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.commit()
         except:
             pass
-        
-        # Use shutil directly - fast for large databases
         shutil.copy2(self.db_path, backup_path)
-        file_size = os.path.getsize(backup_path)
-        print(f"✅ Backup created: {backup_path} ({file_size} bytes)")
-        
-        # Log backup
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT COUNT(*) FROM reviews')
             count = cursor.fetchone()[0]
-            cursor.execute('INSERT INTO backups (review_count, file_path) VALUES (?, ?)',
-                          (count, backup_path))
+            cursor.execute('INSERT INTO backups (review_count, file_path) VALUES (?, ?)', (count, backup_path))
             conn.commit()
-        
         return backup_path
     
     def restore_backup(self, backup_path: str) -> bool:
         if not os.path.exists(backup_path):
             return False
-        
         try:
-            test_conn = sqlite3.connect(backup_path)
-            test_conn.execute("SELECT COUNT(*) FROM reviews")
-            test_conn.close()
-            
-            source = sqlite3.connect(backup_path)
-            dest = sqlite3.connect(self.db_path)
-            source.backup(dest)
-            dest.close()
-            source.close()
-            
+            shutil.copy2(backup_path, self.db_path)
             return True
-        except Exception as e:
-            print(f"❌ Restore failed: {e}")
-            try:
-                shutil.copy2(backup_path, self.db_path)
-                return True
-            except:
-                return False
+        except:
+            return False
     
     def get_review_count(self) -> int:
         try:
@@ -216,32 +175,43 @@ class Database:
 
 
 # =============================================
-# === TOP 10 DATABASE CLASS ===
+# === TOP 10 DATABASE (SPLIT INTO 3 FILES) ===
 # =============================================
 class Top10Database:
-    def __init__(self, db_path: str = "top10.db"):
-        self.db_path = db_path
-        self.init_db()
+    # 4+4+4 split
+    DB_MAP = {
+        "top10_1.db": ["GK", "LB", "RB", "CB"],
+        "top10_2.db": ["CM", "CDM", "CAM", "LM"],
+        "top10_3.db": ["RM", "LW", "RW", "ST"],
+    }
     
-    def init_db(self):
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
-            positions = ['GK', 'LB', 'RB', 'CB', 'CM', 'CDM', 'CAM', 'LM', 'RM', 'LW', 'RW', 'ST']
-            
-            for position in positions:
-                cursor.execute(f'''CREATE TABLE IF NOT EXISTS top10_{position}
-                                 (rank INTEGER PRIMARY KEY,
-                                  player_name TEXT,
-                                  card_name TEXT,
-                                  rating TEXT,
-                                  image_url TEXT,
-                                  image_data TEXT DEFAULT NULL,
-                                  updated_by TEXT,
-                                  updated_at TIMESTAMP)''')
+    def __init__(self):
+        self.init_all_db()
+    
+    def get_db_for_position(self, position: str) -> str:
+        for db_name, positions in self.DB_MAP.items():
+            if position in positions:
+                return db_name
+        return "top10_1.db"
+    
+    def init_all_db(self):
+        for db_name, positions in self.DB_MAP.items():
+            with sqlite3.connect(db_name) as conn:
+                cursor = conn.cursor()
+                for position in positions:
+                    cursor.execute(f'''CREATE TABLE IF NOT EXISTS top10_{position}
+                                     (rank INTEGER PRIMARY KEY,
+                                      player_name TEXT,
+                                      card_name TEXT,
+                                      rating TEXT,
+                                      image_url TEXT,
+                                      image_data TEXT DEFAULT NULL,
+                                      updated_by TEXT,
+                                      updated_at TIMESTAMP)''')
     
     def get_top10(self, position: str):
-        with sqlite3.connect(self.db_path) as conn:
+        db_name = self.get_db_for_position(position)
+        with sqlite3.connect(db_name) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute(f"SELECT * FROM top10_{position} ORDER BY CAST(rank AS INTEGER)")
@@ -255,35 +225,35 @@ class Top10Database:
                 with urllib.request.urlopen(req, timeout=10) as response:
                     image_data = response.read()
                     image_base64 = base64.b64encode(image_data).decode('utf-8')
-                    print(f"✅ Downloaded Top 10 image: {len(image_data)} bytes")
-            except Exception as e:
-                print(f"⚠️ Could not download Top 10 image: {e}")
+            except:
+                pass
         
-        with sqlite3.connect(self.db_path) as conn:
+        db_name = self.get_db_for_position(position)
+        with sqlite3.connect(db_name) as conn:
             cursor = conn.cursor()
             cursor.execute(f'''INSERT OR REPLACE INTO top10_{position} 
                              (rank, player_name, card_name, rating, image_url, image_data, updated_by, updated_at)
                              VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
                           (rank, player_name, card_name, rating, image_url, image_base64, updated_by, datetime.now().isoformat()))
             conn.commit()
-            return True
+        return True
     
     def remove_top10_entry(self, position: str, rank: int) -> bool:
-        with sqlite3.connect(self.db_path) as conn:
+        db_name = self.get_db_for_position(position)
+        with sqlite3.connect(db_name) as conn:
             cursor = conn.cursor()
             cursor.execute(f"DELETE FROM top10_{position} WHERE rank = ?", (rank,))
             conn.commit()
             return cursor.rowcount > 0
     
     def swap_top10_entries(self, position: str, rank1: int, rank2: int) -> bool:
-        with sqlite3.connect(self.db_path) as conn:
+        db_name = self.get_db_for_position(position)
+        with sqlite3.connect(db_name) as conn:
             cursor = conn.cursor()
-            
             cursor.execute(f"SELECT * FROM top10_{position} WHERE rank = ?", (rank1,))
             entry1 = cursor.fetchone()
             cursor.execute(f"SELECT * FROM top10_{position} WHERE rank = ?", (rank2,))
             entry2 = cursor.fetchone()
-            
             if entry1 and entry2:
                 cursor.execute(f"UPDATE top10_{position} SET player_name=?, card_name=?, rating=?, image_url=?, image_data=?, updated_by=?, updated_at=? WHERE rank=?",
                               (entry2[1], entry2[2], entry2[3], entry2[4], entry2[5], "system", datetime.now().isoformat(), rank1))
@@ -291,5 +261,4 @@ class Top10Database:
                               (entry1[1], entry1[2], entry1[3], entry1[4], entry1[5], "system", datetime.now().isoformat(), rank2))
                 conn.commit()
                 return True
-            return False
-            
+        return False
