@@ -14,6 +14,7 @@ import asyncio
 import aiohttp
 import base64
 import io
+import sqlite3
 
 # --- Flask Web Server (for Render health checks) ---
 app = Flask(__name__)
@@ -487,7 +488,6 @@ async def top10_view(interaction: discord.Interaction, position: str):
     position="Position to add to",
     rank="Rank number (1-10)",
     player_name="Player name",
-    card_name="Card name (e.g., TOTY, UCL, Hero)",
     rating="Player rating (e.g., 117 OVR)",
     image="Upload the player card image"
 )
@@ -497,7 +497,6 @@ async def top10_add(
     position: str,
     rank: int,
     player_name: str,
-    card_name: str,
     rating: str,
     image: discord.Attachment
 ):
@@ -511,7 +510,7 @@ async def top10_add(
     
     await interaction.response.defer(ephemeral=True)
     
-    success = top10_db.add_top10_entry(position, rank, player_name, card_name, rating, image.url, interaction.user.name)
+    success = top10_db.add_top10_entry(position, rank, player_name, "", rating, image.url, interaction.user.name)
     
     if success:
         embed = discord.Embed(
@@ -519,7 +518,6 @@ async def top10_add(
             description=f"**{player_name}** added to **{position}** at rank **#{rank}**",
             color=discord.Color.green()
         )
-        embed.add_field(name="Card", value=card_name, inline=True)
         embed.add_field(name="Rating", value=rating, inline=True)
         embed.set_footer(text=f"Updated by {interaction.user.name}")
         await interaction.followup.send(embed=embed, ephemeral=True)
@@ -718,25 +716,26 @@ async def backup_command(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     
     files_to_send = []
-    backup_path = None
     
+    # Force commit before backup
     try:
-        backup_path = bot.db.create_backup()
-        if os.path.exists(backup_path) and os.path.getsize(backup_path) > 0:
-            files_to_send.append(discord.File(backup_path, filename="fcm_reviews.db"))
-    except Exception as e:
-        print(f"❌ Backup failed: {e}")
-        if os.path.exists('fcm_reviews.db') and os.path.getsize('fcm_reviews.db') > 0:
-            files_to_send.append(discord.File('fcm_reviews.db'))
+        conn = sqlite3.connect('fcm_reviews.db')
+        conn.commit()
+        conn.close()
+    except:
+        pass
     
-    if os.path.exists('top10.db'):
+    if os.path.exists('fcm_reviews.db') and os.path.getsize('fcm_reviews.db') > 0:
+        files_to_send.append(discord.File('fcm_reviews.db'))
+    
+    if os.path.exists('top10.db') and os.path.getsize('top10.db') > 0:
         files_to_send.append(discord.File('top10.db'))
     
     if os.path.exists('bot_config.json'):
         files_to_send.append(discord.File('bot_config.json'))
     
     if not files_to_send:
-        await interaction.followup.send("❌ **Backup Failed**\nNo files could be backed up.", ephemeral=True)
+        await interaction.followup.send("❌ No files to backup!", ephemeral=True)
         return
     
     embed = discord.Embed(
@@ -751,12 +750,6 @@ async def backup_command(interaction: discord.Interaction):
     embed.set_footer(text="FCM Review Bot | Save these files!")
     
     await interaction.followup.send(embed=embed, files=files_to_send, ephemeral=True)
-    
-    if backup_path and os.path.exists(backup_path):
-        try:
-            os.remove(backup_path)
-        except:
-            pass
 
 @bot.tree.command(name="restore", description="Restore database from backup files (Owner Only)")
 @app_commands.describe(
@@ -899,7 +892,7 @@ async def help_command(interaction: discord.Interaction):
     
     embed.add_field(
         name="🔧 Top 10 Management",
-        value="`/top10_add` - Add player to Top 10\n`/top10_remove` - Remove player\n`/top10_swap` - Swap ranks\n`/top10_debug` - Show raw entries\n`/top10_clear` - Clear all entries",
+        value="`/top10_add` - Add player to Top 10\n`/top10_remove` - Remove player\n`/top10_swap` - Swap ranks",
         inline=False
     )
     
