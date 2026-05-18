@@ -12,7 +12,6 @@ class Top10Poster:
         self.canvas = None
         self.draw = None
         
-        # Load assets
         self.load_assets()
     
     def load_assets(self):
@@ -30,7 +29,6 @@ class Top10Poster:
         else:
             self.logo = None
         
-        # Try to load fonts
         self.font_title = self.get_font(60, bold=True)
         self.font_name_big = self.get_font(36, bold=True)
         self.font_name_med = self.get_font(24, bold=True)
@@ -56,34 +54,22 @@ class Top10Poster:
                 return ImageFont.load_default()
     
     def get_medal_text(self, rank):
-        """Get text medal for rank"""
-        if rank == 1:
-            return "1st"
-        elif rank == 2:
-            return "2nd"
-        elif rank == 3:
-            return "3rd"
-        else:
-            return f"#{rank}"
+        if rank == 1: return "1st"
+        elif rank == 2: return "2nd"
+        elif rank == 3: return "3rd"
+        else: return f"#{rank}"
     
     def get_font_for_name(self, name, max_width, base_font):
-        """Get appropriate font size to fit name within max_width"""
         bbox = self.draw.textbbox((0, 0), name, font=base_font)
-        text_width = bbox[2] - bbox[0]
-        
-        if text_width <= max_width:
+        if bbox[2] - bbox[0] <= max_width:
             return base_font
-        
         for font in [self.font_name_med, self.font_name_small, self.font_name_tiny]:
             bbox = self.draw.textbbox((0, 0), name, font=font)
-            text_width = bbox[2] - bbox[0]
-            if text_width <= max_width:
+            if bbox[2] - bbox[0] <= max_width:
                 return font
-        
         return self.font_name_tiny
     
     def create_gradient_bg(self):
-        """Create a dark gradient background"""
         img = Image.new('RGBA', (self.width, self.height), (26, 26, 46, 255))
         draw = ImageDraw.Draw(img)
         for i in range(self.height):
@@ -99,10 +85,12 @@ class Top10Poster:
         self.canvas = self.background.copy()
         self.draw = ImageDraw.Draw(self.canvas)
         
-        # Add logo (top right)
+        # Sort entries by actual rank number
+        entries = sorted(entries, key=lambda e: int(e.get('rank', 0)))
+        
+        # Logo
         if self.logo:
-            logo_size = (100, 100)
-            logo_resized = self.logo.resize(logo_size)
+            logo_resized = self.logo.resize((100, 100))
             self.canvas.paste(logo_resized, (self.width - 130, 30), logo_resized)
         
         # Title
@@ -111,7 +99,7 @@ class Top10Poster:
         title_width = bbox[2] - bbox[0]
         self.draw.text((self.width//2 - title_width//2, 50), title, fill='#FFD700', font=self.font_title)
         
-        # Divider line
+        # Divider
         self.draw.line([(100, 140), (self.width - 100, 140)], fill='#FFD700', width=3)
         
         # Position badge
@@ -124,112 +112,115 @@ class Top10Poster:
         pos_w = bbox[2] - bbox[0]
         self.draw.text((self.width//2 - pos_w//2, 172), position, fill='#1a1a2e', font=self.font_rank)
         
-        # Arrange cards based on rank
-        if len(entries) > 0:
-            self.draw_top3(entries, position)
-        if len(entries) > 3:
-            self.draw_remaining(entries[3:], position)
+        # Split by actual rank
+        top3 = [e for e in entries if int(e.get('rank', 0)) <= 3]
+        remaining = [e for e in entries if int(e.get('rank', 0)) > 3]
         
-        # Bottom branding
+        if top3:
+            self.draw_top3(top3, position)
+        if remaining:
+            self.draw_remaining(remaining, position)
+        
+        # Bottom text
         bottom_text = f"FELIX PR | Generated {datetime.now().strftime('%B %d, %Y')}"
         bbox = self.draw.textbbox((0, 0), bottom_text, font=self.font_bottom)
         bw = bbox[2] - bbox[0]
         self.draw.text((self.width//2 - bw//2, self.height - 60), bottom_text, fill='#888888', font=self.font_bottom)
         
-        # Save to bytes
         output = io.BytesIO()
         self.canvas.save(output, format='PNG')
         output.seek(0)
         return output
     
     def draw_top3(self, entries, position):
-        """Draw top 3 players (large cards)"""
-        # #1 - Large center card
-        if len(entries) >= 1:
-            card = self.load_card_image(entries[0])
+        """Draw top 3 by actual rank numbers"""
+        entries = sorted(entries, key=lambda e: int(e.get('rank', 0)))
+        
+        # Find by actual rank
+        rank1 = next((e for e in entries if int(e.get('rank', 0)) == 1), None)
+        rank2 = next((e for e in entries if int(e.get('rank', 0)) == 2), None)
+        rank3 = next((e for e in entries if int(e.get('rank', 0)) == 3), None)
+        
+        # #1 - Center
+        if rank1:
+            card = self.load_card_image(rank1)
             if card:
                 card = card.resize((400, 400))
                 x = self.width//2 - 200
                 y = 240
                 self.draw_card_border(x, y, 400, 400, '#FFD700', 8)
                 self.canvas.paste(card, (x + 6, y + 6), card)
-                
-                name = entries[0].get('player_name', 'Unknown')
-                rating = entries[0].get('rating', 'N/A')
+                name = rank1.get('player_name', 'Unknown')
+                rating = rank1.get('rating', 'N/A')
                 font = self.get_font_for_name(name, 380, self.font_name_big)
                 self.draw.text((self.width//2, 660), name, fill='#FFD700', font=font, anchor='mt')
                 self.draw.text((self.width//2, 710), f"⭐ 1st  •  {rating}", fill='#FFFFFF', font=self.font_rating, anchor='mt')
         
         # #2 & #3 - Side by side
         positions = [(200, 760), (self.width - 650, 760)]
-        for i in range(1, min(3, len(entries))):
-            card = self.load_card_image(entries[i])
-            if card:
-                card = card.resize((350, 350))
-                x, y = positions[i-1]
-                color = '#C0C0C0' if i == 1 else '#CD7F32'
-                self.draw_card_border(x, y, 350, 350, color, 6)
-                self.canvas.paste(card, (x + 5, y + 5), card)
-                
-                rank_text = self.get_medal_text(i + 1)
-                name = entries[i].get('player_name', 'Unknown')
-                rating = entries[i].get('rating', 'N/A')
-                font = self.get_font_for_name(name, 330, self.font_name_med)
-                self.draw.text((x + 175, 1125), name, fill=color, font=font, anchor='mt')
-                self.draw.text((x + 175, 1165), f"⭐ {rank_text}  •  {rating}", fill='#FFFFFF', font=self.font_rating_small, anchor='mt')
+        colors = ['#C0C0C0', '#CD7F32']
+        for i, entry in enumerate([rank2, rank3]):
+            if entry:
+                card = self.load_card_image(entry)
+                if card:
+                    card = card.resize((350, 350))
+                    x, y = positions[i]
+                    self.draw_card_border(x, y, 350, 350, colors[i], 6)
+                    self.canvas.paste(card, (x + 5, y + 5), card)
+                    rank_text = self.get_medal_text(int(entry.get('rank', 0)))
+                    name = entry.get('player_name', 'Unknown')
+                    rating = entry.get('rating', 'N/A')
+                    font = self.get_font_for_name(name, 330, self.font_name_med)
+                    self.draw.text((x + 175, 1125), name, fill=colors[i], font=font, anchor='mt')
+                    self.draw.text((x + 175, 1165), f"⭐ {rank_text}  •  {rating}", fill='#FFFFFF', font=self.font_rating_small, anchor='mt')
     
     def draw_remaining(self, entries, position):
-        """Draw #4-#10 in a grid: 5 on top row, remaining centered on bottom row"""
+        """Draw #4-#10 sorted by actual rank"""
+        entries = sorted(entries, key=lambda e: int(e.get('rank', 0)))
+        
         start_y = 1220
         card_size = 160
         gap_x = 30
         gap_y = 20
         
-        num_remaining = len(entries)
+        num = len(entries)
+        row1_count = min(5, num)
+        row2_count = num - row1_count
         
-        # Always: 5 cards on top row, rest centered on bottom row
-        cards_in_row1 = min(5, num_remaining)
-        cards_in_row2 = num_remaining - cards_in_row1
-        
-        # Row 1 (first 5 cards: ranks 4-8)
-        total_w1 = cards_in_row1 * card_size + (cards_in_row1 - 1) * gap_x
+        # Row 1
+        total_w1 = row1_count * card_size + (row1_count - 1) * gap_x
         start_x1 = (self.width - total_w1) // 2
-        for i in range(cards_in_row1):
+        for i in range(row1_count):
             entry = entries[i]
-            rank = i + 4
+            rank = int(entry.get('rank', 0))
             x = start_x1 + i * (card_size + gap_x)
             y = start_y
             self.draw_small_card(entry, x, y, card_size, rank)
         
-        # Row 2 (remaining cards: ranks 9-10, centered)
-        if cards_in_row2 > 0:
-            total_w2 = cards_in_row2 * card_size + (cards_in_row2 - 1) * gap_x
+        # Row 2
+        if row2_count > 0:
+            total_w2 = row2_count * card_size + (row2_count - 1) * gap_x
             start_x2 = (self.width - total_w2) // 2
-            for i in range(cards_in_row2):
-                entry = entries[cards_in_row1 + i]
-                rank = cards_in_row1 + i + 4
+            for i in range(row2_count):
+                entry = entries[row1_count + i]
+                rank = int(entry.get('rank', 0))
                 x = start_x2 + i * (card_size + gap_x)
                 y = start_y + card_size + gap_y + 50
                 self.draw_small_card(entry, x, y, card_size, rank)
     
     def draw_small_card(self, entry, x, y, card_size, rank):
-        """Draw a single small card for ranks 4-10"""
         card = self.load_card_image(entry)
         if card:
             card = card.resize((card_size, card_size))
             self.draw_card_border(x, y, card_size, card_size, '#555555', 3)
             self.canvas.paste(card, (x + 3, y + 3), card)
-            
             name = entry.get('player_name', 'Unknown')
             rating = entry.get('rating', 'N/A')
-            
             font = self.get_font_for_name(name, 150, self.font_name_small)
-            
             self.draw.text((x + card_size//2, y + card_size + 5), name, fill='#FFFFFF', font=font, anchor='mt')
             self.draw.text((x + card_size//2, y + card_size + 30), f"#{rank} • {rating}", fill='#AAAAAA', font=self.font_bottom, anchor='mt')
     
     def load_card_image(self, entry):
-        """Load card image from base64 data, preserving transparency"""
         try:
             image_data = entry.get('image_data')
             if image_data:
@@ -243,7 +234,6 @@ class Top10Poster:
         return None
     
     def draw_card_border(self, x, y, w, h, color, width):
-        """Draw a rounded rectangle border around a card"""
         self.draw.rounded_rectangle(
             [(x, y), (x + w, y + h)],
             radius=15,
