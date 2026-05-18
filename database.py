@@ -43,7 +43,6 @@ class Database:
                 )
             ''')
             
-            # Check and add missing columns (for existing databases)
             cursor.execute("PRAGMA table_info(reviews)")
             columns = [col[1] for col in cursor.fetchall()]
             
@@ -60,7 +59,6 @@ class Database:
             if 'image_data' not in columns:
                 cursor.execute('ALTER TABLE reviews ADD COLUMN image_data TEXT DEFAULT NULL')
             
-            # Backup history table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS backups (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,7 +81,7 @@ class Database:
                 with urllib.request.urlopen(req, timeout=10) as response:
                     image_data = response.read()
                     image_base64 = base64.b64encode(image_data).decode('utf-8')
-                    print(f"✅ Downloaded & stored image: {len(image_data)} bytes ({len(image_base64)} chars base64)")
+                    print(f"✅ Downloaded & stored image: {len(image_data)} bytes")
             except Exception as e:
                 print(f"⚠️ Could not download image: {e}")
         
@@ -127,9 +125,7 @@ class Database:
                     WHERE id = ?
                 ''', (image_url, image_base64, review_id))
                 conn.commit()
-                print(f"✅ Image stored in database for review {review_id}")
                 return True
-                
         except Exception as e:
             print(f"❌ Failed to update image for review {review_id}: {e}")
             return False
@@ -157,37 +153,33 @@ class Database:
             return cursor.rowcount > 0
     
     def create_backup(self, backup_path: str = None) -> str:
+        """Create a backup using direct file copy (fast, no timeout)"""
         if not backup_path:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_path = f"backup_{timestamp}.db"
         
+        # Force commit any pending changes
         try:
-            source = sqlite3.connect(self.db_path)
-            dest = sqlite3.connect(backup_path)
-            source.backup(dest)
-            dest.close()
-            source.close()
-            
             with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute('SELECT COUNT(*) FROM reviews')
-                count = cursor.fetchone()[0]
-                cursor.execute('''
-                    INSERT INTO backups (review_count, file_path)
-                    VALUES (?, ?)
-                ''', (count, backup_path))
                 conn.commit()
-            
-            print(f"✅ Backup created successfully: {backup_path} ({count} reviews)")
-            return backup_path
-            
-        except Exception as e:
-            print(f"❌ Backup failed: {e}")
-            try:
-                shutil.copy2(self.db_path, backup_path)
-                return backup_path
-            except Exception as e2:
-                raise
+        except:
+            pass
+        
+        # Use shutil directly - fast for large databases
+        shutil.copy2(self.db_path, backup_path)
+        file_size = os.path.getsize(backup_path)
+        print(f"✅ Backup created: {backup_path} ({file_size} bytes)")
+        
+        # Log backup
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT COUNT(*) FROM reviews')
+            count = cursor.fetchone()[0]
+            cursor.execute('INSERT INTO backups (review_count, file_path) VALUES (?, ?)',
+                          (count, backup_path))
+            conn.commit()
+        
+        return backup_path
     
     def restore_backup(self, backup_path: str) -> bool:
         if not os.path.exists(backup_path):
@@ -300,3 +292,4 @@ class Top10Database:
                 conn.commit()
                 return True
             return False
+            
