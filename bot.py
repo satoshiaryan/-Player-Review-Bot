@@ -4,7 +4,7 @@ from discord.ext import commands
 import os
 from datetime import datetime
 from dotenv import load_dotenv
-from database import Database, Top10Database, VoteDatabase
+from database import Database, Top10Database
 from views import ReviewEditView, create_review_embed
 from poster_generator import Top10Poster
 import threading
@@ -15,7 +15,6 @@ import aiohttp
 import base64
 import io
 import sqlite3
-import urllib.request
 
 # --- Flask Web Server (for Render health checks) ---
 app = Flask(__name__)
@@ -52,10 +51,8 @@ async def self_ping():
 load_dotenv()
 
 BOT_OWNER_ID = 1214456066687893506
-VOTER_ROLE_ID = 1484603567057666219
 ALLOWED_REVIEWERS = [1214456066687893506, 553418145063239684, 1202544947161468969,
-    773492040339292190, 1284912012102598767, 1479410597387960371, 1417457966956810261,
-    1075082413853642763, 933685309454057524]
+    773492040339292190, 1284912012102598767, 1479410597387960371, 1417457966956810261, 1075082413853642763, 933685309454057524]
 CONFIG_FILE = "bot_config.json"
 
 class BotConfig:
@@ -75,7 +72,6 @@ class BotConfig:
 config = BotConfig()
 top10_db = Top10Database()
 poster_gen = Top10Poster()
-vote_db = VoteDatabase()
 
 # --- Review Search Dropdown ---
 class ReviewSearchView(discord.ui.View):
@@ -123,19 +119,12 @@ bot = FCMReviewBot()
 def is_allowed_reviewer(uid: int) -> bool: return uid in ALLOWED_REVIEWERS
 def is_bot_owner(uid: int) -> bool: return uid == BOT_OWNER_ID
 def can_edit_top10(uid: int) -> bool: return uid == BOT_OWNER_ID or uid in [553418145063239684]
-def can_vote(uid: int, interaction: discord.Interaction = None) -> bool:
-    if is_bot_owner(uid): return True
-    if interaction and interaction.guild:
-        role = interaction.guild.get_role(VOTER_ROLE_ID)
-        if role and role in interaction.user.roles: return True
-    return False
 
 @bot.event
 async def on_ready():
     print(f'✅ Logged in as {bot.user}')
     print(f'📊 Reviews: {bot.db.get_review_count()}')
     print(f'🏆 Top 10: Active (4+4+4 DB Split)')
-    print(f'🗳️ Voting System: Active (Role: {VOTER_ROLE_ID})')
     bot.loop.create_task(self_ping())
 
 # =============================================
@@ -241,7 +230,7 @@ async def top10_view(interaction: discord.Interaction, position: str):
     if not entries:
         await interaction.followup.send(embed=discord.Embed(
             title=f"🏆 Top 10 {PN.get(position, position)}",
-            description="No players yet!", color=0xF5A623).set_footer(text="FELIX PR"))
+            description="No players yet! Use `/top10_add`.", color=0xF5A623).set_footer(text="FELIX PR"))
         return
     try:
         poster_bytes = poster_gen.generate(entries, position, PN.get(position, position))
@@ -319,14 +308,20 @@ async def top10_import(interaction: discord.Interaction, old_db: discord.Attachm
         await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
     if not old_db.filename.endswith('.db'):
         await interaction.response.send_message("❌ Must be a .db file!", ephemeral=True); return
+    
     await interaction.response.defer(ephemeral=True)
+    
     try:
         file_data = await old_db.read()
         with open('_temp_import.db', 'wb') as f: f.write(file_data)
+        
         old_conn = sqlite3.connect('_temp_import.db')
         old_conn.row_factory = sqlite3.Row
+        
         positions = ['GK','LB','RB','CB','CM','CDM','CAM','LM','RM','LW','RW','ST']
-        total = 0; details = []
+        total = 0
+        details = []
+        
         for pos in positions:
             try:
                 cursor = old_conn.cursor()
@@ -334,162 +329,31 @@ async def top10_import(interaction: discord.Interaction, old_db: discord.Attachm
                 rows = cursor.fetchall()
                 if rows:
                     for row in rows:
-                        top10_db.add_top10_entry(position=pos, rank=row['rank'], player_name=row['player_name'],
+                        top10_db.add_top10_entry(
+                            position=pos, rank=row['rank'], player_name=row['player_name'],
                             card_name=row['card_name'] or "", rating=row['rating'],
-                            image_url=row['image_url'] or "", updated_by=row['updated_by'] or "import")
+                            image_url=row['image_url'] or "", updated_by=row['updated_by'] or "import"
+                        )
                         total += 1
                     details.append(f"✅ {pos}: {len(rows)} entries")
-                else: details.append(f"⚪ {pos}: empty")
-            except Exception as e: details.append(f"⚠️ {pos}: skipped ({e})")
-        old_conn.close(); os.remove('_temp_import.db')
+                else:
+                    details.append(f"⚪ {pos}: empty")
+            except Exception as e:
+                details.append(f"⚠️ {pos}: skipped ({e})")
+        
+        old_conn.close()
+        os.remove('_temp_import.db')
+        
         embed = discord.Embed(title="✅ Import Complete!", description=f"**{total}** entries imported.", color=0x2ecc71)
         embed.add_field(name="Details", value="\n".join(details[:12]), inline=False)
-        embed.set_footer(text="FELIX PR")
+        embed.add_field(name="New Structure", value="• `top10_1.db` - GK, LB, RB, CB\n• `top10_2.db` - CM, CDM, CAM, LM\n• `top10_3.db` - RM, LW, RW, ST", inline=False)
+        embed.set_footer(text="FELIX PR | Data imported successfully!")
         await interaction.followup.send(embed=embed, ephemeral=True)
+        
     except Exception as e:
         await interaction.followup.send(f"❌ Import failed: {e}", ephemeral=True)
         try: os.remove('_temp_import.db')
         except: pass
-
-# =============================================
-# === VOTING COMMANDS ===
-# =============================================
-
-@bot.tree.command(name="vote_start", description="Start a Top 10 vote with 10 player cards (Owner Only)")
-@app_commands.describe(
-    position="Position to vote for",
-    player1_name="Player 1", player1_image="Card 1",
-    player2_name="Player 2", player2_image="Card 2",
-    player3_name="Player 3", player3_image="Card 3",
-    player4_name="Player 4", player4_image="Card 4",
-    player5_name="Player 5", player5_image="Card 5",
-    player6_name="Player 6", player6_image="Card 6",
-    player7_name="Player 7", player7_image="Card 7",
-    player8_name="Player 8", player8_image="Card 8",
-    player9_name="Player 9", player9_image="Card 9",
-    player10_name="Player 10", player10_image="Card 10",
-)
-@app_commands.choices(position=ALL_POSITIONS)
-async def vote_start(
-    interaction: discord.Interaction, position: str,
-    player1_name: str, player1_image: discord.Attachment,
-    player2_name: str, player2_image: discord.Attachment,
-    player3_name: str, player3_image: discord.Attachment,
-    player4_name: str, player4_image: discord.Attachment,
-    player5_name: str, player5_image: discord.Attachment,
-    player6_name: str, player6_image: discord.Attachment,
-    player7_name: str, player7_image: discord.Attachment,
-    player8_name: str, player8_image: discord.Attachment,
-    player9_name: str, player9_image: discord.Attachment,
-    player10_name: str, player10_image: discord.Attachment,
-):
-    if not is_bot_owner(interaction.user.id):
-        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
-    await interaction.response.defer()
-    
-    candidates = []
-    for i in range(1, 11):
-        name = locals().get(f"player{i}_name", "")
-        image = locals().get(f"player{i}_image")
-        if name and image:
-            try:
-                req = urllib.request.Request(image.url, headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    img_data = base64.b64encode(resp.read()).decode('utf-8')
-                candidates.append((name, img_data))
-            except:
-                candidates.append((name, None))
-    
-    if len(candidates) < 10:
-        await interaction.followup.send("❌ Need all 10 players!", ephemeral=True); return
-    
-    vote_id = vote_db.start_vote(position, candidates, str(interaction.user.id))
-    
-    embed = discord.Embed(
-        title=f"🗳️ Top 10 {PN.get(position, position)} - VOTE NOW!",
-        description=f"**Vote ID:** `{vote_id}`\n\n"
-                     "Use `/vote_cast` to rank each player from 1st to 10th.\n"
-                     "Use `/vote_view` to see all candidates.\n"
-                     "Use `/vote_end` when voting is complete.\n\n"
-                     f"🔒 Only users with the voter role can vote!",
-        color=0xF5A623)
-    embed.add_field(name="Candidates", value="\n".join([f"• {c[0]}" for c in candidates]), inline=False)
-    embed.set_footer(text="FELIX PR | Voting System")
-    await interaction.followup.send(embed=embed)
-
-@bot.tree.command(name="vote_view", description="View vote candidates")
-@app_commands.describe(vote_id="Vote session ID")
-async def vote_view(interaction: discord.Interaction, vote_id: int):
-    candidates = vote_db.get_vote_candidates(vote_id)
-    if not candidates:
-        await interaction.response.send_message("❌ Vote not found!", ephemeral=True); return
-    embed = discord.Embed(title=f"🗳️ Vote #{vote_id} Candidates", color=0xF5A623)
-    for i, c in enumerate(candidates, 1):
-        embed.add_field(name=f"#{i}", value=c['candidate_name'], inline=True)
-    await interaction.response.send_message(embed=embed)
-
-@bot.tree.command(name="vote_cast", description="Cast your vote for a rank (Voter Role Only)")
-@app_commands.describe(vote_id="Vote session ID", rank="Rank (1-10)", candidate_name="Player name (exact match)")
-async def vote_cast(interaction: discord.Interaction, vote_id: int, rank: int, candidate_name: str):
-    if not can_vote(interaction.user.id, interaction):
-        await interaction.response.send_message("❌ You don't have the voter role!", ephemeral=True); return
-    if rank < 1 or rank > 10:
-        await interaction.response.send_message("❌ Rank must be 1-10!", ephemeral=True); return
-    candidates = vote_db.get_vote_candidates(vote_id)
-    candidate = next((c for c in candidates if c['candidate_name'].lower() == candidate_name.lower()), None)
-    if not candidate:
-        await interaction.response.send_message(f"❌ **{candidate_name}** not found in this vote!", ephemeral=True); return
-    vote_db.cast_vote(vote_id, candidate['id'], rank, str(interaction.user.id), interaction.user.display_name)
-    await interaction.response.send_message(f"✅ Voted **{candidate_name}** for **#{rank}**!", ephemeral=True)
-
-@bot.tree.command(name="vote_end", description="End voting and generate Top 10 from results (Owner Only)")
-@app_commands.describe(vote_id="Vote session ID")
-async def vote_end(interaction: discord.Interaction, vote_id: int):
-    if not is_bot_owner(interaction.user.id):
-        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
-    await interaction.response.defer()
-    
-    results = vote_db.get_vote_results(vote_id)
-    if not results['candidates']:
-        await interaction.followup.send("❌ Vote not found!", ephemeral=True); return
-    
-    candidates = {c['id']: c for c in results['candidates']}
-    winners = {}
-    for rank in range(1, 11):
-        tally = results['results'].get(rank, {})
-        if tally:
-            winner_id = max(tally, key=tally.get)
-            winners[rank] = candidates[winner_id]
-    
-    if len(winners) < 10:
-        await interaction.followup.send(f"❌ Not enough votes! Only {len(winners)} ranks have votes.", ephemeral=True); return
-    
-    conn = sqlite3.connect('votes.db')
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("SELECT position FROM active_votes WHERE id = ?", (vote_id,))
-    row = cursor.fetchone()
-    conn.close()
-    position = row['position'] if row else "ST"
-    
-    for rank, candidate in winners.items():
-        top10_db.add_top10_entry(position, rank, candidate['candidate_name'], "", "Voted", "", "Community Vote")
-        db_name = top10_db.get_db_for_position(position)
-        with sqlite3.connect(db_name) as conn2:
-            conn2.cursor().execute(f"UPDATE top10_{position} SET image_data = ? WHERE rank = ?", (candidate['image_data'], rank))
-            conn2.commit()
-    
-    vote_db.end_vote(vote_id)
-    
-    embed = discord.Embed(
-        title=f"✅ Vote #{vote_id} Ended!",
-        description=f"**Position:** {PN.get(position, position)}\n**Total Voters:** {results['total_voters']}\n\nResults saved to Top 10!",
-        color=0x2ecc71)
-    for rank in range(1, 11):
-        if rank in winners:
-            embed.add_field(name=f"#{rank}", value=winners[rank]['candidate_name'], inline=True)
-    embed.set_footer(text="Use /top10 to view the new poster!")
-    await interaction.followup.send(embed=embed)
 
 # =============================================
 # === OTHER COMMANDS ===
@@ -545,7 +409,7 @@ async def backup_command(interaction: discord.Interaction):
         conn = sqlite3.connect('fcm_reviews.db'); conn.commit(); conn.close()
     except: pass
     files = []
-    for f in ['fcm_reviews.db','top10_1.db','top10_2.db','top10_3.db','votes.db','bot_config.json']:
+    for f in ['fcm_reviews.db','top10_1.db','top10_2.db','top10_3.db','bot_config.json']:
         if os.path.exists(f) and os.path.getsize(f) > 0: files.append(discord.File(f))
     if not files:
         await interaction.followup.send("❌ No files!", ephemeral=True); return
@@ -556,12 +420,10 @@ async def backup_command(interaction: discord.Interaction):
 
 @bot.tree.command(name="restore", description="Restore from backup (Owner)")
 @app_commands.describe(reviews_file="fcm_reviews.db", top10_1_file="top10_1.db (opt)",
-    top10_2_file="top10_2.db (opt)", top10_3_file="top10_3.db (opt)",
-    votes_file="votes.db (opt)", config_file="bot_config.json (opt)")
+    top10_2_file="top10_2.db (opt)", top10_3_file="top10_3.db (opt)", config_file="bot_config.json (opt)")
 async def restore_command(interaction: discord.Interaction, reviews_file: discord.Attachment,
     top10_1_file: discord.Attachment = None, top10_2_file: discord.Attachment = None,
-    top10_3_file: discord.Attachment = None, votes_file: discord.Attachment = None,
-    config_file: discord.Attachment = None):
+    top10_3_file: discord.Attachment = None, config_file: discord.Attachment = None):
     if not is_bot_owner(interaction.user.id):
         await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
     await interaction.response.defer(ephemeral=True)
@@ -574,7 +436,7 @@ async def restore_command(interaction: discord.Interaction, reviews_file: discor
             restored.append(f"✅ fcm_reviews.db ({bot.db.get_review_count()} reviews)")
         except Exception as e: failed.append(f"❌ fcm_reviews.db: {e}")
     else: failed.append("❌ reviews_file must be .db")
-    for file_obj, name in [(top10_1_file,'top10_1.db'),(top10_2_file,'top10_2.db'),(top10_3_file,'top10_3.db'),(votes_file,'votes.db')]:
+    for file_obj, name in [(top10_1_file,'top10_1.db'),(top10_2_file,'top10_2.db'),(top10_3_file,'top10_3.db')]:
         if file_obj and file_obj.filename.endswith('.db'):
             try:
                 data = await file_obj.read()
@@ -599,7 +461,7 @@ async def dbcheck_command(interaction: discord.Interaction):
         await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
     await interaction.response.defer(ephemeral=True)
     embed = discord.Embed(title="🔍 Database Status", color=0x3498db)
-    for db in ['fcm_reviews.db','top10_1.db','top10_2.db','top10_3.db','votes.db']:
+    for db in ['fcm_reviews.db','top10_1.db','top10_2.db','top10_3.db']:
         e = os.path.exists(db); s = os.path.getsize(db) if e else 0
         embed.add_field(name=f"📁 {db}", value=f"Exists: {e}\nSize: {s:,} bytes ({s/1024:.1f} KB)", inline=True)
     embed.add_field(name="📂 Working Dir", value=f"`{os.getcwd()}`", inline=False)
@@ -612,7 +474,7 @@ async def stats_command(interaction: discord.Interaction):
     rs = os.path.getsize('fcm_reviews.db')/1024 if os.path.exists('fcm_reviews.db') else 0
     embed.add_field(name="Reviews DB", value=f"{rs:.1f} KB", inline=True)
     embed.add_field(name="Latency", value=f"{round(bot.latency*1000)}ms", inline=True)
-    for db in ['top10_1.db','top10_2.db','top10_3.db','votes.db']:
+    for db in ['top10_1.db','top10_2.db','top10_3.db']:
         s = os.path.getsize(db)/1024 if os.path.exists(db) else 0
         embed.add_field(name=db, value=f"{s:.1f} KB", inline=True)
     await interaction.response.send_message(embed=embed)
@@ -624,13 +486,12 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="🧤 `/review_gk`", value="Create GK review", inline=False)
     embed.add_field(name="🏆 `/top10 <pos>`", value="View Top 10 poster", inline=False)
     embed.add_field(name="🔧 Top 10 Mgmt", value="`/top10_add` `/top10_remove` `/top10_swap`\n`/top10_debug` `/top10_clear` `/top10_import`", inline=False)
-    embed.add_field(name="🗳️ Voting (Voter Role Only)", value="`/vote_start` - Start vote with 10 cards\n`/vote_view` - See candidates\n`/vote_cast` - Vote for ranks\n`/vote_end` - Tally & save to Top 10", inline=False)
     embed.add_field(name="🖼️ `/update_image`", value="Update card image", inline=False)
     embed.add_field(name="🔍 `/search`", value="Search reviews", inline=False)
     embed.add_field(name="📋 `/list_reviews`", value="List all reviews", inline=False)
     embed.add_field(name="💾 `/backup` & `/restore`", value="Backup/restore all data", inline=False)
     embed.add_field(name="📊 `/stats` & `/dbcheck`", value="Statistics & diagnostics", inline=False)
-    embed.set_footer(text="FELIX PR | 4+4+4 DB Split | Voting System")
+    embed.set_footer(text="FELIX PR | 4+4+4 DB Split")
     await interaction.response.send_message(embed=embed)
 
 if __name__ == "__main__":
@@ -639,3 +500,4 @@ if __name__ == "__main__":
     token = os.getenv('DISCORD_TOKEN')
     if not token: print("❌ DISCORD_TOKEN not set!"); exit(1)
     bot.run(token)
+Here's bot.py
