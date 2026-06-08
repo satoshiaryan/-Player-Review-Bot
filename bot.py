@@ -500,4 +500,4 @@ if __name__ == "__main__":
     token = os.getenv('DISCORD_TOKEN')
     if not token: print("❌ DISCORD_TOKEN not set!"); exit(1)
     bot.run(token)
-Here's bot.py
+
