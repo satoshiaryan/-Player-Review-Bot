@@ -178,7 +178,6 @@ class Database:
 # === TOP 10 DATABASE (SPLIT INTO 3 FILES) ===
 # =============================================
 class Top10Database:
-    # 4+4+4 split
     DB_MAP = {
         "top10_1.db": ["GK", "LB", "RB", "CB"],
         "top10_2.db": ["CM", "CDM", "CAM", "LM"],
@@ -262,3 +261,111 @@ class Top10Database:
                 conn.commit()
                 return True
         return False
+
+
+# =============================================
+# === VOTING DATABASE ===
+# =============================================
+class VoteDatabase:
+    def __init__(self, db_path: str = "votes.db"):
+        self.db_path = db_path
+        self.init_db()
+    
+    def init_db(self):
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS active_votes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    position TEXT NOT NULL,
+                    created_by TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    status TEXT DEFAULT "active"
+                )
+            ''')
+            
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS vote_candidates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    vote_id INTEGER,
+                    candidate_name TEXT,
+                    image_data TEXT,
+                    FOREIGN KEY (vote_id) REFERENCES active_votes(id)
+                )
+            ''')
+            
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS votes_cast (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    vote_id INTEGER,
+                    candidate_id INTEGER,
+                    voter_id TEXT,
+                    voter_name TEXT,
+                    rank INTEGER,
+                    voted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (vote_id) REFERENCES active_votes(id),
+                    FOREIGN KEY (candidate_id) REFERENCES vote_candidates(id)
+                )
+            ''')
+    
+    def start_vote(self, position: str, candidates: list, created_by: str) -> int:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('INSERT INTO active_votes (position, created_by) VALUES (?, ?)', (position, created_by))
+            vote_id = cursor.lastrowid
+            for name, image_data in candidates:
+                cursor.execute('INSERT INTO vote_candidates (vote_id, candidate_name, image_data) VALUES (?, ?, ?)', (vote_id, name, image_data))
+            conn.commit()
+            return vote_id
+    
+    def get_active_votes(self) -> list:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM active_votes WHERE status = 'active' ORDER BY created_at DESC")
+            return [dict(row) for row in cursor.fetchall()]
+    
+    def get_vote_candidates(self, vote_id: int) -> list:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM vote_candidates WHERE vote_id = ?", (vote_id,))
+            return [dict(row) for row in cursor.fetchall()]
+    
+    def cast_vote(self, vote_id: int, candidate_id: int, rank: int, voter_id: str, voter_name: str) -> bool:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT id FROM votes_cast WHERE vote_id = ? AND voter_id = ? AND rank = ?', (vote_id, voter_id, rank))
+            if cursor.fetchone():
+                cursor.execute('UPDATE votes_cast SET candidate_id = ?, voter_name = ?, voted_at = CURRENT_TIMESTAMP WHERE vote_id = ? AND voter_id = ? AND rank = ?',
+                              (candidate_id, voter_name, vote_id, voter_id, rank))
+            else:
+                cursor.execute('INSERT INTO votes_cast (vote_id, candidate_id, voter_id, voter_name, rank) VALUES (?, ?, ?, ?, ?)',
+                              (vote_id, candidate_id, voter_id, voter_name, rank))
+            conn.commit()
+            return True
+    
+    def get_vote_results(self, vote_id: int) -> dict:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM vote_candidates WHERE vote_id = ?", (vote_id,))
+            candidates = [dict(row) for row in cursor.fetchall()]
+            cursor.execute("SELECT * FROM votes_cast WHERE vote_id = ?", (vote_id,))
+            all_votes = [dict(row) for row in cursor.fetchall()]
+            results = {}
+            for rank in range(1, 11):
+                rank_votes = [v for v in all_votes if v['rank'] == rank]
+                tally = {}
+                for v in rank_votes:
+                    cid = v['candidate_id']
+                    tally[cid] = tally.get(cid, 0) + 1
+                results[rank] = tally
+            return {'candidates': candidates, 'results': results, 'total_voters': len(set(v['voter_id'] for v in all_votes))}
+    
+    def end_vote(self, vote_id: int):
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE active_votes SET status = 'closed' WHERE id = ?", (vote_id,))
+            conn.commit()
