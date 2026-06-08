@@ -234,7 +234,7 @@ async def top10_view(interaction: discord.Interaction, position: str):
     if not entries:
         await interaction.followup.send(embed=discord.Embed(
             title=f"🏆 Top 10 {PN.get(position, position)}",
-            description="No players yet! Use `/top10_add`.", color=0xF5A623).set_footer(text="FELIX PR"))
+            description="No players yet! Use `/top10_add` or `/top10_vote`.", color=0xF5A623).set_footer(text="FELIX PR"))
         return
     try:
         poster_bytes = poster_gen.generate(entries, position, PN.get(position, position))
@@ -348,7 +348,7 @@ async def top10_import(interaction: discord.Interaction, old_db: discord.Attachm
 # === VOTING COMMANDS ===
 # =============================================
 
-@bot.tree.command(name="vote_start", description="Start a Top 10 vote with player cards (Owner Only)")
+@bot.tree.command(name="vote_start", description="Start a Top 10 vote with 10 player cards (Owner Only)")
 @app_commands.describe(
     position="Position to vote for",
     player1_name="Player 1", player1_image="Card 1",
@@ -361,11 +361,6 @@ async def top10_import(interaction: discord.Interaction, old_db: discord.Attachm
     player8_name="Player 8", player8_image="Card 8",
     player9_name="Player 9", player9_image="Card 9",
     player10_name="Player 10", player10_image="Card 10",
-    player11_name="Player 11 (opt)", player11_image="Card 11 (opt)",
-    player12_name="Player 12 (opt)", player12_image="Card 12 (opt)",
-    player13_name="Player 13 (opt)", player13_image="Card 13 (opt)",
-    player14_name="Player 14 (opt)", player14_image="Card 14 (opt)",
-    player15_name="Player 15 (opt)", player15_image="Card 15 (opt)",
 )
 @app_commands.choices(position=ALL_POSITIONS)
 async def vote_start(
@@ -380,18 +375,13 @@ async def vote_start(
     player8_name: str, player8_image: discord.Attachment,
     player9_name: str, player9_image: discord.Attachment,
     player10_name: str, player10_image: discord.Attachment,
-    player11_name: str = "", player11_image: discord.Attachment = None,
-    player12_name: str = "", player12_image: discord.Attachment = None,
-    player13_name: str = "", player13_image: discord.Attachment = None,
-    player14_name: str = "", player14_image: discord.Attachment = None,
-    player15_name: str = "", player15_image: discord.Attachment = None,
 ):
     if not is_bot_owner(interaction.user.id):
         await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
     await interaction.response.defer()
     
     candidates = []
-    for i in range(1, 16):
+    for i in range(1, 11):
         name = locals().get(f"player{i}_name", "")
         image = locals().get(f"player{i}_image")
         if name and image:
@@ -404,18 +394,18 @@ async def vote_start(
                 candidates.append((name, None))
     
     if len(candidates) < 10:
-        await interaction.followup.send("❌ Need at least 10 players!", ephemeral=True); return
+        await interaction.followup.send("❌ Need all 10 players!", ephemeral=True); return
     
     vote_id = vote_db.start_vote(position, candidates, str(interaction.user.id))
     
     embed = discord.Embed(
         title=f"🗳️ Top 10 {PN.get(position, position)} - VOTE NOW!",
         description=f"**Vote ID:** `{vote_id}`\n\n"
-                     "Use `/vote_cast` to rank each player.\n"
-                     "Use `/vote_view` to see candidates.\n"
-                     "Use `/vote_end` when done.",
+                     "Use `/vote_cast` to rank each player from 1st to 10th.\n"
+                     "Use `/vote_view` to see all candidates.\n"
+                     "Use `/vote_end` when voting is complete.",
         color=0xF5A623)
-    embed.add_field(name="Candidates", value="\n".join([f"• {c[0]}" for c in candidates[:15]]), inline=False)
+    embed.add_field(name="Candidates", value="\n".join([f"• {c[0]}" for c in candidates]), inline=False)
     embed.set_footer(text="FELIX PR | Voting System")
     await interaction.followup.send(embed=embed)
 
@@ -431,18 +421,18 @@ async def vote_view(interaction: discord.Interaction, vote_id: int):
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="vote_cast", description="Cast your vote for a rank")
-@app_commands.describe(vote_id="Vote session ID", rank="Rank (1-10)", candidate_name="Player name (exact)")
+@app_commands.describe(vote_id="Vote session ID", rank="Rank (1-10)", candidate_name="Player name (exact match)")
 async def vote_cast(interaction: discord.Interaction, vote_id: int, rank: int, candidate_name: str):
     if rank < 1 or rank > 10:
         await interaction.response.send_message("❌ Rank must be 1-10!", ephemeral=True); return
     candidates = vote_db.get_vote_candidates(vote_id)
     candidate = next((c for c in candidates if c['candidate_name'].lower() == candidate_name.lower()), None)
     if not candidate:
-        await interaction.response.send_message(f"❌ **{candidate_name}** not found!", ephemeral=True); return
+        await interaction.response.send_message(f"❌ **{candidate_name}** not found in this vote!", ephemeral=True); return
     vote_db.cast_vote(vote_id, candidate['id'], rank, str(interaction.user.id), interaction.user.display_name)
     await interaction.response.send_message(f"✅ Voted **{candidate_name}** for **#{rank}**!", ephemeral=True)
 
-@bot.tree.command(name="vote_end", description="End voting and generate Top 10 (Owner Only)")
+@bot.tree.command(name="vote_end", description="End voting and generate Top 10 from results (Owner Only)")
 @app_commands.describe(vote_id="Vote session ID")
 async def vote_end(interaction: discord.Interaction, vote_id: int):
     if not is_bot_owner(interaction.user.id):
@@ -462,7 +452,7 @@ async def vote_end(interaction: discord.Interaction, vote_id: int):
             winners[rank] = candidates[winner_id]
     
     if len(winners) < 10:
-        await interaction.followup.send(f"❌ Not enough votes! Only {len(winners)} ranks voted.", ephemeral=True); return
+        await interaction.followup.send(f"❌ Not enough votes! Only {len(winners)} ranks have votes.", ephemeral=True); return
     
     conn = sqlite3.connect('votes.db')
     conn.row_factory = sqlite3.Row
@@ -482,10 +472,12 @@ async def vote_end(interaction: discord.Interaction, vote_id: int):
     vote_db.end_vote(vote_id)
     
     embed = discord.Embed(
-        title=f"✅ Vote #{vote_id} Ended!", description=f"**Position:** {PN.get(position, position)}\n**Voters:** {results['total_voters']}\n\nSaved to Top 10!",
+        title=f"✅ Vote #{vote_id} Ended!",
+        description=f"**Position:** {PN.get(position, position)}\n**Total Voters:** {results['total_voters']}\n\nResults saved to Top 10!",
         color=0x2ecc71)
     for rank in range(1, 11):
-        if rank in winners: embed.add_field(name=f"#{rank}", value=winners[rank]['candidate_name'], inline=True)
+        if rank in winners:
+            embed.add_field(name=f"#{rank}", value=winners[rank]['candidate_name'], inline=True)
     embed.set_footer(text="Use /top10 to view the new poster!")
     await interaction.followup.send(embed=embed)
 
@@ -622,7 +614,7 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="🧤 `/review_gk`", value="Create GK review", inline=False)
     embed.add_field(name="🏆 `/top10 <pos>`", value="View Top 10 poster", inline=False)
     embed.add_field(name="🔧 Top 10 Mgmt", value="`/top10_add` `/top10_remove` `/top10_swap`\n`/top10_debug` `/top10_clear` `/top10_import`", inline=False)
-    embed.add_field(name="🗳️ Voting System", value="`/vote_start` `/vote_view` `/vote_cast` `/vote_end`", inline=False)
+    embed.add_field(name="🗳️ Voting System", value="`/vote_start` - Start vote with 10 cards\n`/vote_view` - See candidates\n`/vote_cast` - Vote for ranks\n`/vote_end` - Tally & save to Top 10", inline=False)
     embed.add_field(name="🖼️ `/update_image`", value="Update card image", inline=False)
     embed.add_field(name="🔍 `/search`", value="Search reviews", inline=False)
     embed.add_field(name="📋 `/list_reviews`", value="List all reviews", inline=False)
