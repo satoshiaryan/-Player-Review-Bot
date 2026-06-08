@@ -52,6 +52,7 @@ async def self_ping():
 load_dotenv()
 
 BOT_OWNER_ID = 1214456066687893506
+VOTER_ROLE_ID = 1484603567057666219
 ALLOWED_REVIEWERS = [1214456066687893506, 553418145063239684, 1202544947161468969,
     773492040339292190, 1284912012102598767, 1479410597387960371, 1417457966956810261,
     1075082413853642763, 933685309454057524]
@@ -122,13 +123,19 @@ bot = FCMReviewBot()
 def is_allowed_reviewer(uid: int) -> bool: return uid in ALLOWED_REVIEWERS
 def is_bot_owner(uid: int) -> bool: return uid == BOT_OWNER_ID
 def can_edit_top10(uid: int) -> bool: return uid == BOT_OWNER_ID or uid in [553418145063239684]
+def can_vote(uid: int, interaction: discord.Interaction = None) -> bool:
+    if is_bot_owner(uid): return True
+    if interaction and interaction.guild:
+        role = interaction.guild.get_role(VOTER_ROLE_ID)
+        if role and role in interaction.user.roles: return True
+    return False
 
 @bot.event
 async def on_ready():
     print(f'✅ Logged in as {bot.user}')
     print(f'📊 Reviews: {bot.db.get_review_count()}')
     print(f'🏆 Top 10: Active (4+4+4 DB Split)')
-    print(f'🗳️ Voting System: Active')
+    print(f'🗳️ Voting System: Active (Role: {VOTER_ROLE_ID})')
     bot.loop.create_task(self_ping())
 
 # =============================================
@@ -234,7 +241,7 @@ async def top10_view(interaction: discord.Interaction, position: str):
     if not entries:
         await interaction.followup.send(embed=discord.Embed(
             title=f"🏆 Top 10 {PN.get(position, position)}",
-            description="No players yet! Use `/top10_add` or `/top10_vote`.", color=0xF5A623).set_footer(text="FELIX PR"))
+            description="No players yet!", color=0xF5A623).set_footer(text="FELIX PR"))
         return
     try:
         poster_bytes = poster_gen.generate(entries, position, PN.get(position, position))
@@ -403,7 +410,8 @@ async def vote_start(
         description=f"**Vote ID:** `{vote_id}`\n\n"
                      "Use `/vote_cast` to rank each player from 1st to 10th.\n"
                      "Use `/vote_view` to see all candidates.\n"
-                     "Use `/vote_end` when voting is complete.",
+                     "Use `/vote_end` when voting is complete.\n\n"
+                     f"🔒 Only users with the voter role can vote!",
         color=0xF5A623)
     embed.add_field(name="Candidates", value="\n".join([f"• {c[0]}" for c in candidates]), inline=False)
     embed.set_footer(text="FELIX PR | Voting System")
@@ -420,9 +428,11 @@ async def vote_view(interaction: discord.Interaction, vote_id: int):
         embed.add_field(name=f"#{i}", value=c['candidate_name'], inline=True)
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="vote_cast", description="Cast your vote for a rank")
+@bot.tree.command(name="vote_cast", description="Cast your vote for a rank (Voter Role Only)")
 @app_commands.describe(vote_id="Vote session ID", rank="Rank (1-10)", candidate_name="Player name (exact match)")
 async def vote_cast(interaction: discord.Interaction, vote_id: int, rank: int, candidate_name: str):
+    if not can_vote(interaction.user.id, interaction):
+        await interaction.response.send_message("❌ You don't have the voter role!", ephemeral=True); return
     if rank < 1 or rank > 10:
         await interaction.response.send_message("❌ Rank must be 1-10!", ephemeral=True); return
     candidates = vote_db.get_vote_candidates(vote_id)
@@ -614,7 +624,7 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="🧤 `/review_gk`", value="Create GK review", inline=False)
     embed.add_field(name="🏆 `/top10 <pos>`", value="View Top 10 poster", inline=False)
     embed.add_field(name="🔧 Top 10 Mgmt", value="`/top10_add` `/top10_remove` `/top10_swap`\n`/top10_debug` `/top10_clear` `/top10_import`", inline=False)
-    embed.add_field(name="🗳️ Voting System", value="`/vote_start` - Start vote with 10 cards\n`/vote_view` - See candidates\n`/vote_cast` - Vote for ranks\n`/vote_end` - Tally & save to Top 10", inline=False)
+    embed.add_field(name="🗳️ Voting (Voter Role Only)", value="`/vote_start` - Start vote with 10 cards\n`/vote_view` - See candidates\n`/vote_cast` - Vote for ranks\n`/vote_end` - Tally & save to Top 10", inline=False)
     embed.add_field(name="🖼️ `/update_image`", value="Update card image", inline=False)
     embed.add_field(name="🔍 `/search`", value="Search reviews", inline=False)
     embed.add_field(name="📋 `/list_reviews`", value="List all reviews", inline=False)
