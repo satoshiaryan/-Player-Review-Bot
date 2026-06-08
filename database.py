@@ -7,7 +7,7 @@ import base64
 import urllib.request
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-
+ 
 class Database:
     def __init__(self, db_path: str = "fcm_reviews.db"):
         self.db_path = db_path
