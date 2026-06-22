@@ -55,6 +55,9 @@ ALLOWED_REVIEWERS = [1214456066687893506, 553418145063239684, 120254494716146896
     773492040339292190, 1284912012102598767, 1479410597387960371, 1417457966956810261, 1075082413853642763, 933685309454057524]
 CONFIG_FILE = "bot_config.json"
 
+# === MAINTENANCE MODE ===
+maintenance_mode = False
+
 class BotConfig:
     def __init__(self):
         self.data = self.load()
@@ -72,6 +75,21 @@ class BotConfig:
 config = BotConfig()
 top10_db = Top10Database()
 poster_gen = Top10Poster()
+
+# --- Maintenance Check Decorator ---
+def maintenance_check():
+    """Decorator to check maintenance mode before running a command"""
+    async def predicate(interaction: discord.Interaction) -> bool:
+        if maintenance_mode and not is_bot_owner(interaction.user.id):
+            await interaction.response.send_message(
+                "🔧 **Bot is under maintenance now, please wait.**\n\n"
+                "The bot owner is currently making updates.\n"
+                "Try again in a few minutes!",
+                ephemeral=True
+            )
+            return False
+        return True
+    return app_commands.check(predicate)
 
 # --- Review Search Dropdown ---
 class ReviewSearchView(discord.ui.View):
@@ -95,6 +113,8 @@ class ReviewSelect(discord.ui.Select):
         super().__init__(placeholder="Select a review...", min_values=1, max_values=1, options=options)
     
     async def callback(self, interaction: discord.Interaction):
+        if maintenance_mode and not is_bot_owner(interaction.user.id):
+            await interaction.response.send_message("🔧 **Bot is under maintenance now, please wait.**", ephemeral=True); return
         review_id = int(self.values[0])
         review = self.db.get_review(review_id)
         if not review:
@@ -125,13 +145,40 @@ async def on_ready():
     print(f'✅ Logged in as {bot.user}')
     print(f'📊 Reviews: {bot.db.get_review_count()}')
     print(f'🏆 Top 10: Active (4+4+4 DB Split)')
+    print(f'🔧 Maintenance Mode: {"ON" if maintenance_mode else "OFF"}')
     bot.loop.create_task(self_ping())
+
+# =============================================
+# === MAINTENANCE COMMAND (NO LOCK CHECK) ===
+# =============================================
+
+@bot.tree.command(name="maintenance", description="Toggle maintenance mode (Owner Only)")
+@app_commands.describe(status="ON or OFF")
+@app_commands.choices(status=[
+    app_commands.Choice(name="ON - Lock bot for everyone else", value="on"),
+    app_commands.Choice(name="OFF - Unlock bot", value="off"),
+])
+async def maintenance_cmd(interaction: discord.Interaction, status: str):
+    if not is_bot_owner(interaction.user.id):
+        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
+    
+    global maintenance_mode
+    maintenance_mode = (status == "on")
+    
+    embed = discord.Embed(
+        title=f"🔧 Maintenance Mode: {'🟢 ON' if maintenance_mode else '🟢 OFF'}",
+        description="Only the bot owner can use commands when maintenance is ON." if maintenance_mode else "All users can use commands now.",
+        color=0xF59E0B if maintenance_mode else 0x2ecc71
+    )
+    embed.set_footer(text="FELIX PR")
+    await interaction.response.send_message(embed=embed)
 
 # =============================================
 # === REVIEW COMMANDS ===
 # =============================================
 
 @bot.tree.command(name="review_outfield", description="Create outfield player review")
+@maintenance_check()
 @app_commands.describe(
     player_name="Player name", rating="Rating (e.g., 97 OVR)", event="Event/Promo",
     pace="PACE", shooting="SHOOTING", passing="PASSING", dribbling="DRIBBLING",
@@ -163,6 +210,7 @@ async def review_outfield(
     else: await interaction.followup.send(embed=embed, view=view)
 
 @bot.tree.command(name="review_gk", description="Create goalkeeper review")
+@maintenance_check()
 @app_commands.describe(
     player_name="Player name", rating="Rating (e.g., 96 OVR)", event="Event/Promo",
     diving="DIVING", positioning="POSITIONING", handling="HANDLING", reflexes="REFLEXES",
@@ -194,6 +242,7 @@ async def review_gk(
     else: await interaction.followup.send(embed=embed, view=view)
 
 @bot.tree.command(name="update_image", description="Update card image (Owner Only)")
+@maintenance_check()
 @app_commands.describe(review_id="Review ID", image="New card image")
 async def update_image(interaction: discord.Interaction, review_id: int, image: discord.Attachment):
     if not is_bot_owner(interaction.user.id):
@@ -222,6 +271,7 @@ PN = {"GK":"Goalkeeper","LB":"Left Back","RB":"Right Back","CB":"Center Back",
       "RW":"Right Winger","ST":"Striker"}
 
 @bot.tree.command(name="top10", description="View Top 10 poster")
+@maintenance_check()
 @app_commands.describe(position="Select position")
 @app_commands.choices(position=ALL_POSITIONS)
 async def top10_view(interaction: discord.Interaction, position: str):
@@ -243,6 +293,7 @@ async def top10_view(interaction: discord.Interaction, position: str):
         await interaction.followup.send(f"❌ Error: {e}")
 
 @bot.tree.command(name="top10_add", description="Add player to Top 10 (Owner/Admin)")
+@maintenance_check()
 @app_commands.describe(position="Position", rank="Rank (1-10)", player_name="Player name",
     rating="Rating (e.g., 117 OVR)", image="Card image")
 @app_commands.choices(position=ALL_POSITIONS)
@@ -258,6 +309,7 @@ async def top10_add(interaction: discord.Interaction, position: str, rank: int,
     else: await interaction.followup.send("❌ Failed!", ephemeral=True)
 
 @bot.tree.command(name="top10_remove", description="Remove player (Owner/Admin)")
+@maintenance_check()
 @app_commands.describe(position="Position", rank="Rank to remove")
 @app_commands.choices(position=ALL_POSITIONS)
 async def top10_remove(interaction: discord.Interaction, position: str, rank: int):
@@ -268,6 +320,7 @@ async def top10_remove(interaction: discord.Interaction, position: str, rank: in
     else: await interaction.response.send_message(f"❌ No player at #{rank}!", ephemeral=True)
 
 @bot.tree.command(name="top10_swap", description="Swap two ranks (Owner/Admin)")
+@maintenance_check()
 @app_commands.describe(position="Position", rank1="First rank", rank2="Second rank")
 @app_commands.choices(position=ALL_POSITIONS)
 async def top10_swap(interaction: discord.Interaction, position: str, rank1: int, rank2: int):
@@ -280,6 +333,7 @@ async def top10_swap(interaction: discord.Interaction, position: str, rank1: int
     else: await interaction.response.send_message("❌ Failed!", ephemeral=True)
 
 @bot.tree.command(name="top10_debug", description="Show raw entries (Owner)")
+@maintenance_check()
 @app_commands.describe(position="Position")
 @app_commands.choices(position=ALL_POSITIONS)
 async def top10_debug(interaction: discord.Interaction, position: str):
@@ -293,6 +347,7 @@ async def top10_debug(interaction: discord.Interaction, position: str):
     await interaction.response.send_message(text, ephemeral=True)
 
 @bot.tree.command(name="top10_clear", description="Clear all entries for a position (Owner)")
+@maintenance_check()
 @app_commands.describe(position="Position")
 @app_commands.choices(position=ALL_POSITIONS)
 async def top10_clear(interaction: discord.Interaction, position: str):
@@ -302,6 +357,7 @@ async def top10_clear(interaction: discord.Interaction, position: str):
     await interaction.response.send_message(f"✅ Cleared {position}!", ephemeral=True)
 
 @bot.tree.command(name="top10_import", description="Import old top10.db into new 4+4+4 databases (Owner Only)")
+@maintenance_check()
 @app_commands.describe(old_db="Upload your old top10.db file")
 async def top10_import(interaction: discord.Interaction, old_db: discord.Attachment):
     if not is_bot_owner(interaction.user.id):
@@ -314,14 +370,10 @@ async def top10_import(interaction: discord.Interaction, old_db: discord.Attachm
     try:
         file_data = await old_db.read()
         with open('_temp_import.db', 'wb') as f: f.write(file_data)
-        
         old_conn = sqlite3.connect('_temp_import.db')
         old_conn.row_factory = sqlite3.Row
-        
         positions = ['GK','LB','RB','CB','CM','CDM','CAM','LM','RM','LW','RW','ST']
-        total = 0
-        details = []
-        
+        total = 0; details = []
         for pos in positions:
             try:
                 cursor = old_conn.cursor()
@@ -329,27 +381,18 @@ async def top10_import(interaction: discord.Interaction, old_db: discord.Attachm
                 rows = cursor.fetchall()
                 if rows:
                     for row in rows:
-                        top10_db.add_top10_entry(
-                            position=pos, rank=row['rank'], player_name=row['player_name'],
+                        top10_db.add_top10_entry(position=pos, rank=row['rank'], player_name=row['player_name'],
                             card_name=row['card_name'] or "", rating=row['rating'],
-                            image_url=row['image_url'] or "", updated_by=row['updated_by'] or "import"
-                        )
+                            image_url=row['image_url'] or "", updated_by=row['updated_by'] or "import")
                         total += 1
                     details.append(f"✅ {pos}: {len(rows)} entries")
-                else:
-                    details.append(f"⚪ {pos}: empty")
-            except Exception as e:
-                details.append(f"⚠️ {pos}: skipped ({e})")
-        
-        old_conn.close()
-        os.remove('_temp_import.db')
-        
+                else: details.append(f"⚪ {pos}: empty")
+            except Exception as e: details.append(f"⚠️ {pos}: skipped ({e})")
+        old_conn.close(); os.remove('_temp_import.db')
         embed = discord.Embed(title="✅ Import Complete!", description=f"**{total}** entries imported.", color=0x2ecc71)
         embed.add_field(name="Details", value="\n".join(details[:12]), inline=False)
-        embed.add_field(name="New Structure", value="• `top10_1.db` - GK, LB, RB, CB\n• `top10_2.db` - CM, CDM, CAM, LM\n• `top10_3.db` - RM, LW, RW, ST", inline=False)
-        embed.set_footer(text="FELIX PR | Data imported successfully!")
+        embed.set_footer(text="FELIX PR")
         await interaction.followup.send(embed=embed, ephemeral=True)
-        
     except Exception as e:
         await interaction.followup.send(f"❌ Import failed: {e}", ephemeral=True)
         try: os.remove('_temp_import.db')
@@ -360,6 +403,7 @@ async def top10_import(interaction: discord.Interaction, old_db: discord.Attachm
 # =============================================
 
 @bot.tree.command(name="search", description="Search reviews")
+@maintenance_check()
 @app_commands.describe(player_name="Player name")
 async def search_command(interaction: discord.Interaction, player_name: str):
     reviews = bot.db.get_all_reviews()
@@ -370,6 +414,7 @@ async def search_command(interaction: discord.Interaction, player_name: str):
     await interaction.response.send_message(embed=embed, view=ReviewSearchView(matching, bot.db, config), ephemeral=False)
 
 @bot.tree.command(name="assign_reviewer_role", description="Set reviewer role (Owner)")
+@maintenance_check()
 @app_commands.describe(role="Role for editing")
 async def assign_reviewer_role(interaction: discord.Interaction, role: discord.Role):
     if not is_bot_owner(interaction.user.id):
@@ -378,6 +423,7 @@ async def assign_reviewer_role(interaction: discord.Interaction, role: discord.R
     await interaction.response.send_message(f"✅ **{role.name}** can now edit reviews!")
 
 @bot.tree.command(name="check_reviewer_role", description="Check reviewer role (Owner)")
+@maintenance_check()
 async def check_reviewer_role(interaction: discord.Interaction):
     if not is_bot_owner(interaction.user.id):
         await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
@@ -389,6 +435,7 @@ async def check_reviewer_role(interaction: discord.Interaction):
     else: await interaction.response.send_message("❌ No role set!", ephemeral=True)
 
 @bot.tree.command(name="list_reviews", description="List all reviews")
+@maintenance_check()
 async def list_reviews(interaction: discord.Interaction):
     reviews = bot.db.get_all_reviews()
     if not reviews:
@@ -401,6 +448,7 @@ async def list_reviews(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="backup", description="Download all data (Owner)")
+@maintenance_check()
 async def backup_command(interaction: discord.Interaction):
     if not is_bot_owner(interaction.user.id):
         await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
@@ -419,6 +467,7 @@ async def backup_command(interaction: discord.Interaction):
     await interaction.followup.send(embed=embed, files=files, ephemeral=True)
 
 @bot.tree.command(name="restore", description="Restore from backup (Owner)")
+@maintenance_check()
 @app_commands.describe(reviews_file="fcm_reviews.db", top10_1_file="top10_1.db (opt)",
     top10_2_file="top10_2.db (opt)", top10_3_file="top10_3.db (opt)", config_file="bot_config.json (opt)")
 async def restore_command(interaction: discord.Interaction, reviews_file: discord.Attachment,
@@ -456,6 +505,7 @@ async def restore_command(interaction: discord.Interaction, reviews_file: discor
     await interaction.followup.send(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="dbcheck", description="Check database status (Owner)")
+@maintenance_check()
 async def dbcheck_command(interaction: discord.Interaction):
     if not is_bot_owner(interaction.user.id):
         await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
@@ -468,6 +518,7 @@ async def dbcheck_command(interaction: discord.Interaction):
     await interaction.followup.send(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="stats", description="Bot statistics")
+@maintenance_check()
 async def stats_command(interaction: discord.Interaction):
     embed = discord.Embed(title="📊 FELIX PR Stats", color=0x2ecc71, timestamp=datetime.now())
     embed.add_field(name="Reviews", value=str(bot.db.get_review_count()), inline=True)
@@ -480,6 +531,7 @@ async def stats_command(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="help", description="Show all commands")
+@maintenance_check()
 async def help_command(interaction: discord.Interaction):
     embed = discord.Embed(title="📚 FELIX PR - Help", color=0x8B5CF6, description="FC Mobile Player Review Bot")
     embed.add_field(name="⚽ `/review_outfield`", value="Create outfield review", inline=False)
@@ -491,6 +543,7 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="📋 `/list_reviews`", value="List all reviews", inline=False)
     embed.add_field(name="💾 `/backup` & `/restore`", value="Backup/restore all data", inline=False)
     embed.add_field(name="📊 `/stats` & `/dbcheck`", value="Statistics & diagnostics", inline=False)
+    embed.add_field(name="🔧 `/maintenance`", value="Toggle maintenance mode (Owner)", inline=False)
     embed.set_footer(text="FELIX PR | 4+4+4 DB Split")
     await interaction.response.send_message(embed=embed)
 
@@ -500,4 +553,3 @@ if __name__ == "__main__":
     token = os.getenv('DISCORD_TOKEN')
     if not token: print("❌ DISCORD_TOKEN not set!"); exit(1)
     bot.run(token)
-
