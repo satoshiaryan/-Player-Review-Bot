@@ -51,12 +51,13 @@ async def self_ping():
 load_dotenv()
 
 BOT_OWNER_ID = 1214456066687893506
+REVIEWER_ROLE_ID = 1431661564020264990
 ALLOWED_REVIEWERS = [1214456066687893506, 553418145063239684, 1202544947161468969,
     773492040339292190, 1284912012102598767, 1479410597387960371, 1417457966956810261, 1075082413853642763, 933685309454057524]
 CONFIG_FILE = "bot_config.json"
 
-# === MAINTENANCE MODE ===
-maintenance_mode = False
+# === MAINTENANCE MODE (ON BY DEFAULT) ===
+maintenance_mode = True
 
 class BotConfig:
     def __init__(self):
@@ -140,12 +141,20 @@ def is_allowed_reviewer(uid: int) -> bool: return uid in ALLOWED_REVIEWERS
 def is_bot_owner(uid: int) -> bool: return uid == BOT_OWNER_ID
 def can_edit_top10(uid: int) -> bool: return uid == BOT_OWNER_ID or uid in [553418145063239684]
 
+def has_reviewer_role(interaction: discord.Interaction) -> bool:
+    """Check if user has the reviewer role"""
+    if not interaction.guild: return False
+    role = interaction.guild.get_role(REVIEWER_ROLE_ID)
+    if role and role in interaction.user.roles: return True
+    return False
+
 @bot.event
 async def on_ready():
     print(f'✅ Logged in as {bot.user}')
     print(f'📊 Reviews: {bot.db.get_review_count()}')
     print(f'🏆 Top 10: Active (4+4+4 DB Split)')
-    print(f'🔧 Maintenance Mode: {"ON" if maintenance_mode else "OFF"}')
+    print(f'🔧 Maintenance Mode: {"🟢 ON" if maintenance_mode else "🟢 OFF"} (Default: ON)')
+    print(f'🎭 Reviewer Role ID: {REVIEWER_ROLE_ID}')
     bot.loop.create_task(self_ping())
 
 # =============================================
@@ -174,10 +183,10 @@ async def maintenance_cmd(interaction: discord.Interaction, status: str):
     await interaction.response.send_message(embed=embed)
 
 # =============================================
-# === REVIEW COMMANDS ===
+# === REVIEW COMMANDS (Require Reviewer Role) ===
 # =============================================
 
-@bot.tree.command(name="review_outfield", description="Create outfield player review")
+@bot.tree.command(name="review_outfield", description="Create outfield player review (Reviewer Role Required)")
 @maintenance_check()
 @app_commands.describe(
     player_name="Player name", rating="Rating (e.g., 97 OVR)", event="Event/Promo",
@@ -196,8 +205,8 @@ async def review_outfield(
     skill_move: int, weak_foot: int, strong_foot: str,
     skill_points: str = "", image: discord.Attachment = None):
     
-    if not is_allowed_reviewer(interaction.user.id):
-        await interaction.response.send_message("❌ Not authorized!", ephemeral=True); return
+    if not is_allowed_reviewer(interaction.user.id) and not has_reviewer_role(interaction):
+        await interaction.response.send_message("❌ You need the reviewer role to create reviews!", ephemeral=True); return
     await interaction.response.defer()
     stats = f"**PAC:** {pace} | **SHO:** {shooting} | **PAS:** {passing}\n**DRI:** {dribbling} | **DEF:** {defending} | **PHY:** {physical}"
     img_url = image.url if image else None
@@ -209,7 +218,7 @@ async def review_outfield(
     if file: await interaction.followup.send(embed=embed, file=file, view=view)
     else: await interaction.followup.send(embed=embed, view=view)
 
-@bot.tree.command(name="review_gk", description="Create goalkeeper review")
+@bot.tree.command(name="review_gk", description="Create goalkeeper review (Reviewer Role Required)")
 @maintenance_check()
 @app_commands.describe(
     player_name="Player name", rating="Rating (e.g., 96 OVR)", event="Event/Promo",
@@ -228,8 +237,8 @@ async def review_gk(
     skill_move: int, weak_foot: int, strong_foot: str,
     skill_points: str = "", image: discord.Attachment = None):
     
-    if not is_allowed_reviewer(interaction.user.id):
-        await interaction.response.send_message("❌ Not authorized!", ephemeral=True); return
+    if not is_allowed_reviewer(interaction.user.id) and not has_reviewer_role(interaction):
+        await interaction.response.send_message("❌ You need the reviewer role to create reviews!", ephemeral=True); return
     await interaction.response.defer()
     stats = f"**DIV:** {diving} | **POS:** {positioning} | **HAN:** {handling}\n**REF:** {reflexes} | **KIC:** {kicking} | **PHY:** {physical}"
     img_url = image.url if image else None
@@ -543,8 +552,8 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="📋 `/list_reviews`", value="List all reviews", inline=False)
     embed.add_field(name="💾 `/backup` & `/restore`", value="Backup/restore all data", inline=False)
     embed.add_field(name="📊 `/stats` & `/dbcheck`", value="Statistics & diagnostics", inline=False)
-    embed.add_field(name="🔧 `/maintenance`", value="Toggle maintenance mode (Owner)", inline=False)
-    embed.set_footer(text="FELIX PR | 4+4+4 DB Split")
+    embed.add_field(name="🔧 `/maintenance on/off`", value="Toggle maintenance mode (Owner)", inline=False)
+    embed.set_footer(text="FELIX PR | 4+4+4 DB Split | Maintenance ON by default")
     await interaction.response.send_message(embed=embed)
 
 if __name__ == "__main__":
