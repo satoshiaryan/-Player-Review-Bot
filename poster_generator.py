@@ -27,9 +27,10 @@ class Top10Poster:
             self.logo = None
         
         self.font_title = self.get_font(52, bold=True)
-        self.font_name = self.get_font(18, bold=True)
-        self.font_name_small = self.get_font(14, bold=True)
-        self.font_rating = self.get_font(20)
+        self.font_name_big = self.get_font(26, bold=True)
+        self.font_name_small = self.get_font(20, bold=True)
+        self.font_rating = self.get_font(22)
+        self.font_rating_small = self.get_font(18)
         self.font_rank = self.get_font(18)
         self.font_bottom = self.get_font(18)
     
@@ -57,8 +58,6 @@ class Top10Poster:
         if bbox[2] - bbox[0] <= max_width:
             return base_font
         bbox = self.draw.textbbox((0, 0), name, font=self.font_name_small)
-        if bbox[2] - bbox[0] <= max_width:
-            return self.font_name_small
         return self.font_name_small
     
     def create_gradient_bg(self):
@@ -86,35 +85,36 @@ class Top10Poster:
         # Title (WHITE)
         title = f"TOP 10 {position_name.upper()}"
         bbox = self.draw.textbbox((0, 0), title, font=self.font_title)
-        self.draw.text((self.width//2 - (bbox[2]-bbox[0])//2, 30), title, fill='#FFFFFF', font=self.font_title)
+        self.draw.text((self.width//2 - (bbox[2]-bbox[0])//2, 28), title, fill='#FFFFFF', font=self.font_title)
         
         # Divider (WHITE)
-        self.draw.line([(100, 95), (self.width - 100, 95)], fill='#FFFFFF', width=2)
+        self.draw.line([(80, 90), (self.width - 80, 90)], fill='#FFFFFF', width=2)
         
         # Position badge
-        badge_w, badge_h = 160, 40
+        badge_w, badge_h = 160, 38
         self.draw.rounded_rectangle(
-            [(self.width//2 - badge_w//2, 108), (self.width//2 + badge_w//2, 148)],
-            radius=20, fill='#FFFFFF')
+            [(self.width//2 - badge_w//2, 102), (self.width//2 + badge_w//2, 140)],
+            radius=19, fill='#FFFFFF')
         bbox = self.draw.textbbox((0, 0), position, font=self.font_rank)
-        self.draw.text((self.width//2 - (bbox[2]-bbox[0])//2, 118), position, fill='#1a1a2e', font=self.font_rank)
+        self.draw.text((self.width//2 - (bbox[2]-bbox[0])//2, 111), position, fill='#1a1a2e', font=self.font_rank)
         
         # =============================================
-        # === ALL CARDS SAME SIZE: 200x200 ===
+        # === ALL CARDS 320x320 ===
         # === 1-2-3-4 PYRAMID LAYOUT ===
         # =============================================
         
-        CARD_SIZE = 200
-        GAP_X = 25
-        GAP_Y = 20
-        START_Y = 190
-        ROW_SPACING = CARD_SIZE + GAP_Y + 55  # card + gap + name/rating space
+        CARD_SIZE = 320
+        GAP_X = 30
+        GAP_Y = 12
+        START_Y = 175
+        ROW_SPACING = CARD_SIZE + GAP_Y + 48
+        
         center_x = self.width // 2
         
         # Row 1: Rank 1 - 1 card
         rank1 = next((e for e in entries if int(e.get('rank', 0)) == 1), None)
         if rank1:
-            self.draw_uniform_card(rank1, 1, center_x, START_Y, CARD_SIZE, '#FFD700', 6, True)
+            self.draw_uniform_card(rank1, 1, center_x, START_Y, CARD_SIZE, '#FFD700', 7, True)
         
         # Row 2: Ranks 2-3 - 2 cards
         row2_y = START_Y + ROW_SPACING
@@ -150,7 +150,7 @@ class Top10Poster:
         # Bottom text
         bottom_text = f"FELIX PR | Generated {datetime.now().strftime('%B %d, %Y')}"
         bbox = self.draw.textbbox((0, 0), bottom_text, font=self.font_bottom)
-        self.draw.text((self.width//2 - (bbox[2]-bbox[0])//2, self.height - 45), bottom_text, fill='#888888', font=self.font_bottom)
+        self.draw.text((self.width//2 - (bbox[2]-bbox[0])//2, self.height - 40), bottom_text, fill='#888888', font=self.font_bottom)
         
         output = io.BytesIO()
         self.canvas.save(output, format='PNG')
@@ -158,7 +158,7 @@ class Top10Poster:
         return output
     
     def draw_uniform_card(self, entry, rank, center_x, y, card_size, border_color, border_width, is_top3):
-        """Draw a single card - all same size"""
+        """Draw a single 320x320 card"""
         card = self.load_card_image(entry)
         if not card:
             print(f"⚠️ No image for rank {rank}: {entry.get('player_name', 'Unknown')}")
@@ -176,8 +176,8 @@ class Top10Poster:
         
         # Name below card
         name_y = y + card_size + 6
-        max_name_w = card_size + 30
-        font = self.get_font_for_name(name, max_name_w, self.font_name)
+        max_name_w = card_size + 40
+        font = self.get_font_for_name(name, max_name_w, self.font_name_big if is_top3 else self.font_name_small)
         name_color = border_color if is_top3 else '#FFFFFF'
         self.draw.text((center_x, name_y), name, fill=name_color, font=font, anchor='mt')
         
@@ -186,7 +186,8 @@ class Top10Poster:
         medal = "⭐ " if is_top3 else ""
         rank_text = f"{medal}{self.get_medal_text(rank)}  •  {rating}"
         rating_color = '#FFFFFF' if is_top3 else '#CCCCCC'
-        self.draw.text((center_x, rating_y), rank_text, fill=rating_color, font=self.font_rating, anchor='mt')
+        rating_font = self.font_rating if is_top3 else self.font_rating_small
+        self.draw.text((center_x, rating_y), rank_text, fill=rating_color, font=rating_font, anchor='mt')
     
     def load_card_image(self, entry):
         try:
@@ -206,7 +207,7 @@ class Top10Poster:
     def draw_card_border(self, x, y, w, h, color, width):
         self.draw.rounded_rectangle(
             [(x, y), (x + w, y + h)],
-            radius=10,
+            radius=12,
             outline=color,
             width=width
         )
