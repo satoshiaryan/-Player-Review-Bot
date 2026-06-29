@@ -26,15 +26,12 @@ class Top10Poster:
         else:
             self.logo = None
         
-        self.font_title = self.get_font(56, bold=True)
-        self.font_name_big = self.get_font(32, bold=True)
-        self.font_name_med = self.get_font(22, bold=True)
-        self.font_name_small = self.get_font(16, bold=True)
-        self.font_name_tiny = self.get_font(12, bold=True)
-        self.font_rating = self.get_font(24)
-        self.font_rating_small = self.get_font(18)
-        self.font_rank = self.get_font(20)
-        self.font_bottom = self.get_font(20)
+        self.font_title = self.get_font(52, bold=True)
+        self.font_name = self.get_font(18, bold=True)
+        self.font_name_small = self.get_font(14, bold=True)
+        self.font_rating = self.get_font(20)
+        self.font_rank = self.get_font(18)
+        self.font_bottom = self.get_font(18)
     
     def get_font(self, size, bold=False):
         try:
@@ -59,11 +56,10 @@ class Top10Poster:
         bbox = self.draw.textbbox((0, 0), name, font=base_font)
         if bbox[2] - bbox[0] <= max_width:
             return base_font
-        for font in [self.font_name_med, self.font_name_small, self.font_name_tiny]:
-            bbox = self.draw.textbbox((0, 0), name, font=font)
-            if bbox[2] - bbox[0] <= max_width:
-                return font
-        return self.font_name_tiny
+        bbox = self.draw.textbbox((0, 0), name, font=self.font_name_small)
+        if bbox[2] - bbox[0] <= max_width:
+            return self.font_name_small
+        return self.font_name_small
     
     def create_gradient_bg(self):
         img = Image.new('RGBA', (self.width, self.height), (26, 26, 46, 255))
@@ -84,83 +80,85 @@ class Top10Poster:
         
         # Logo (top right)
         if self.logo:
-            logo_resized = self.logo.resize((90, 90))
-            self.canvas.paste(logo_resized, (self.width - 120, 25), logo_resized)
+            logo_resized = self.logo.resize((80, 80))
+            self.canvas.paste(logo_resized, (self.width - 110, 20), logo_resized)
         
         # Title (WHITE)
         title = f"TOP 10 {position_name.upper()}"
         bbox = self.draw.textbbox((0, 0), title, font=self.font_title)
-        self.draw.text((self.width//2 - (bbox[2]-bbox[0])//2, 40), title, fill='#FFFFFF', font=self.font_title)
+        self.draw.text((self.width//2 - (bbox[2]-bbox[0])//2, 30), title, fill='#FFFFFF', font=self.font_title)
         
         # Divider (WHITE)
-        self.draw.line([(100, 110), (self.width - 100, 110)], fill='#FFFFFF', width=2)
+        self.draw.line([(100, 95), (self.width - 100, 95)], fill='#FFFFFF', width=2)
         
         # Position badge
-        badge_w, badge_h = 180, 45
+        badge_w, badge_h = 160, 40
         self.draw.rounded_rectangle(
-            [(self.width//2 - badge_w//2, 125), (self.width//2 + badge_w//2, 170)],
-            radius=22, fill='#FFFFFF')
+            [(self.width//2 - badge_w//2, 108), (self.width//2 + badge_w//2, 148)],
+            radius=20, fill='#FFFFFF')
         bbox = self.draw.textbbox((0, 0), position, font=self.font_rank)
-        self.draw.text((self.width//2 - (bbox[2]-bbox[0])//2, 137), position, fill='#1a1a2e', font=self.font_rank)
+        self.draw.text((self.width//2 - (bbox[2]-bbox[0])//2, 118), position, fill='#1a1a2e', font=self.font_rank)
         
         # =============================================
+        # === ALL CARDS SAME SIZE: 200x200 ===
         # === 1-2-3-4 PYRAMID LAYOUT ===
         # =============================================
         
-        # Row 1: Rank 1 (center, large) - 1 card
+        CARD_SIZE = 200
+        GAP_X = 25
+        GAP_Y = 20
+        START_Y = 190
+        ROW_SPACING = CARD_SIZE + GAP_Y + 55  # card + gap + name/rating space
+        center_x = self.width // 2
+        
+        # Row 1: Rank 1 - 1 card
         rank1 = next((e for e in entries if int(e.get('rank', 0)) == 1), None)
         if rank1:
-            self.draw_rank_card(rank1, 1, self.width//2, 260, 320, 320, '#FFD700', 7, True)
+            self.draw_uniform_card(rank1, 1, center_x, START_Y, CARD_SIZE, '#FFD700', 6, True)
         
         # Row 2: Ranks 2-3 - 2 cards
-        row2_y = 700
-        row2_card_size = 240
-        row2_gap = 40
-        row2_total_w = 2 * row2_card_size + row2_gap
-        row2_start_x = (self.width - row2_total_w) // 2
+        row2_y = START_Y + ROW_SPACING
+        row2_total_w = 2 * CARD_SIZE + GAP_X
+        row2_start_x = center_x - row2_total_w // 2
         for i, r in enumerate([2, 3]):
             entry = next((e for e in entries if int(e.get('rank', 0)) == r), None)
             if entry:
                 color = '#C0C0C0' if r == 2 else '#CD7F32'
-                x = row2_start_x + i * (row2_card_size + row2_gap)
-                self.draw_rank_card(entry, r, x + row2_card_size//2, row2_y, row2_card_size, row2_card_size, color, 5, True)
+                x = row2_start_x + i * (CARD_SIZE + GAP_X)
+                self.draw_uniform_card(entry, r, x + CARD_SIZE // 2, row2_y, CARD_SIZE, color, 5, True)
         
         # Row 3: Ranks 4-6 - 3 cards
-        row3_y = 1020
-        row3_card_size = 190
-        row3_gap = 35
-        row3_total_w = 3 * row3_card_size + 2 * row3_gap
-        row3_start_x = (self.width - row3_total_w) // 2
+        row3_y = row2_y + ROW_SPACING
+        row3_total_w = 3 * CARD_SIZE + 2 * GAP_X
+        row3_start_x = center_x - row3_total_w // 2
         for i, r in enumerate([4, 5, 6]):
             entry = next((e for e in entries if int(e.get('rank', 0)) == r), None)
             if entry:
-                x = row3_start_x + i * (row3_card_size + row3_gap)
-                self.draw_rank_card(entry, r, x + row3_card_size//2, row3_y, row3_card_size, row3_card_size, '#777777', 4, False)
+                x = row3_start_x + i * (CARD_SIZE + GAP_X)
+                self.draw_uniform_card(entry, r, x + CARD_SIZE // 2, row3_y, CARD_SIZE, '#FFFFFF', 4, False)
         
         # Row 4: Ranks 7-10 - 4 cards
-        row4_y = 1300
-        row4_card_size = 160
-        row4_gap = 25
-        row4_total_w = 4 * row4_card_size + 3 * row4_gap
-        row4_start_x = (self.width - row4_total_w) // 2
+        row4_y = row3_y + ROW_SPACING
+        row4_total_w = 4 * CARD_SIZE + 3 * GAP_X
+        row4_start_x = center_x - row4_total_w // 2
         for i, r in enumerate([7, 8, 9, 10]):
             entry = next((e for e in entries if int(e.get('rank', 0)) == r), None)
             if entry:
-                x = row4_start_x + i * (row4_card_size + row4_gap)
-                self.draw_rank_card(entry, r, x + row4_card_size//2, row4_y, row4_card_size, row4_card_size, '#555555', 3, False)
+                x = row4_start_x + i * (CARD_SIZE + GAP_X)
+                self.draw_uniform_card(entry, r, x + CARD_SIZE // 2, row4_y, CARD_SIZE, '#FFFFFF', 3, False)
         
         # Bottom text
         bottom_text = f"FELIX PR | Generated {datetime.now().strftime('%B %d, %Y')}"
         bbox = self.draw.textbbox((0, 0), bottom_text, font=self.font_bottom)
-        self.draw.text((self.width//2 - (bbox[2]-bbox[0])//2, self.height - 50), bottom_text, fill='#888888', font=self.font_bottom)
+        self.draw.text((self.width//2 - (bbox[2]-bbox[0])//2, self.height - 45), bottom_text, fill='#888888', font=self.font_bottom)
         
         output = io.BytesIO()
         self.canvas.save(output, format='PNG')
         output.seek(0)
         return output
     
-    def draw_rank_card(self, entry, rank, center_x, y, card_w, card_h, border_color, border_width, is_top3):
-        """Draw a single card centered at (center_x, y)"""
+    def draw_uniform_card(self, entry, rank, center_x, y, card_size, border_color, border_width, is_top3):
+        """Draw a single card - all same size"""
         card = self.load_card_image(entry)
         if not card:
             print(f"⚠️ No image for rank {rank}: {entry.get('player_name', 'Unknown')}")
@@ -169,25 +167,26 @@ class Top10Poster:
         name = entry.get('player_name', 'Unknown')
         rating = entry.get('rating', 'N/A')
         
-        card = card.resize((card_w, card_h))
-        x = center_x - card_w // 2
+        card = card.resize((card_size, card_size))
+        x = center_x - card_size // 2
         
         # Card border
-        self.draw_card_border(x, y, card_w, card_h, border_color, border_width)
+        self.draw_card_border(x, y, card_size, card_size, border_color, border_width)
         self.canvas.paste(card, (x + border_width - 1, y + border_width - 1), card)
         
-        # Name & rating below card
-        name_y = y + card_h + 8
-        max_name_w = card_w + 20
-        font = self.get_font_for_name(name, max_name_w, self.font_name_small if not is_top3 else self.font_name_med)
-        self.draw.text((center_x, name_y), name, fill='#FFFFFF' if not is_top3 else border_color, font=font, anchor='mt')
+        # Name below card
+        name_y = y + card_size + 6
+        max_name_w = card_size + 30
+        font = self.get_font_for_name(name, max_name_w, self.font_name)
+        name_color = border_color if is_top3 else '#FFFFFF'
+        self.draw.text((center_x, name_y), name, fill=name_color, font=font, anchor='mt')
         
         # Rating
-        rating_y = name_y + font.size + 5
+        rating_y = name_y + font.size + 4
         medal = "⭐ " if is_top3 else ""
         rank_text = f"{medal}{self.get_medal_text(rank)}  •  {rating}"
-        rating_font = self.font_rating_small if not is_top3 else self.font_rating
-        self.draw.text((center_x, rating_y), rank_text, fill='#CCCCCC' if not is_top3 else '#FFFFFF', font=rating_font, anchor='mt')
+        rating_color = '#FFFFFF' if is_top3 else '#CCCCCC'
+        self.draw.text((center_x, rating_y), rank_text, fill=rating_color, font=self.font_rating, anchor='mt')
     
     def load_card_image(self, entry):
         try:
@@ -207,7 +206,7 @@ class Top10Poster:
     def draw_card_border(self, x, y, w, h, color, width):
         self.draw.rounded_rectangle(
             [(x, y), (x + w, y + h)],
-            radius=12,
+            radius=10,
             outline=color,
             width=width
         )
