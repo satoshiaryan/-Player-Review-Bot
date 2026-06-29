@@ -98,24 +98,24 @@ class Top10Poster:
         self.draw.text((self.width//2 - (bbox[2]-bbox[0])//2, 111), position, fill='#1a1a2e', font=self.font_rank)
         
         # =============================================
-        # === ALL CARDS 290x290 ===
+        # === ALL CARDS 280x280 ===
         # === 1-2-3-4 PYRAMID LAYOUT ===
         # =============================================
         
-        CARD_SIZE = 290
-        GAP_X = 28
-        GAP_Y = 10
-        START_Y = 170
-        ROW_SPACING = CARD_SIZE + GAP_Y + 45
+        CARD_SIZE = 280
+        GAP_X = 30
+        GAP_Y = 12
+        START_Y = 175
+        ROW_SPACING = CARD_SIZE + GAP_Y + 42
         
         center_x = self.width // 2
         
-        # Row 1: Rank 1 - 1 card (290px fits in 1200px ✅)
+        # Row 1: 1 card (280px ✅)
         rank1 = next((e for e in entries if int(e.get('rank', 0)) == 1), None)
         if rank1:
             self.draw_uniform_card(rank1, 1, center_x, START_Y, CARD_SIZE, '#FFD700', 6, True)
         
-        # Row 2: Ranks 2-3 - 2 cards (2×290 + 28 = 608px ✅)
+        # Row 2: 2 cards (2×280 + 30 = 590px ✅)
         row2_y = START_Y + ROW_SPACING
         row2_total_w = 2 * CARD_SIZE + GAP_X
         row2_start_x = center_x - row2_total_w // 2
@@ -126,7 +126,7 @@ class Top10Poster:
                 x = row2_start_x + i * (CARD_SIZE + GAP_X)
                 self.draw_uniform_card(entry, r, x + CARD_SIZE // 2, row2_y, CARD_SIZE, color, 5, True)
         
-        # Row 3: Ranks 4-6 - 3 cards (3×290 + 56 = 926px ✅)
+        # Row 3: 3 cards (3×280 + 60 = 900px ✅)
         row3_y = row2_y + ROW_SPACING
         row3_total_w = 3 * CARD_SIZE + 2 * GAP_X
         row3_start_x = center_x - row3_total_w // 2
@@ -136,9 +136,9 @@ class Top10Poster:
                 x = row3_start_x + i * (CARD_SIZE + GAP_X)
                 self.draw_uniform_card(entry, r, x + CARD_SIZE // 2, row3_y, CARD_SIZE, '#FFFFFF', 4, False)
         
-        # Row 4: Ranks 7-10 - 4 cards (4×290 + 84 = 1244px ⚠️ slightly over!)
-        # Need tighter gap: GAP_X = 20 for this row
-        row4_gap = 20
+        # Row 4: 4 cards (4×280 + 90 = 1210px ⚠️ 10px over!)
+        # Tighter gap: 23px → 4×280 + 69 = 1189px ✅
+        row4_gap = 23
         row4_y = row3_y + ROW_SPACING
         row4_total_w = 4 * CARD_SIZE + 3 * row4_gap
         row4_start_x = center_x - row4_total_w // 2
