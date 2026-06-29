@@ -98,24 +98,24 @@ class Top10Poster:
         self.draw.text((self.width//2 - (bbox[2]-bbox[0])//2, 111), position, fill='#1a1a2e', font=self.font_rank)
         
         # =============================================
-        # === ALL CARDS 280x280 ===
+        # === ALL CARDS 260x260 ===
         # === 1-2-3-4 PYRAMID LAYOUT ===
         # =============================================
         
-        CARD_SIZE = 280
+        CARD_SIZE = 260
         GAP_X = 30
-        GAP_Y = 12
+        GAP_Y = 15
         START_Y = 175
-        ROW_SPACING = CARD_SIZE + GAP_Y + 42
+        ROW_SPACING = CARD_SIZE + GAP_Y + 40
         
         center_x = self.width // 2
         
-        # Row 1: 1 card (280px ✅)
+        # Row 1: 1 card (260px ✅)
         rank1 = next((e for e in entries if int(e.get('rank', 0)) == 1), None)
         if rank1:
             self.draw_uniform_card(rank1, 1, center_x, START_Y, CARD_SIZE, '#FFD700', 6, True)
         
-        # Row 2: 2 cards (2×280 + 30 = 590px ✅)
+        # Row 2: 2 cards (2×260 + 30 = 550px ✅)
         row2_y = START_Y + ROW_SPACING
         row2_total_w = 2 * CARD_SIZE + GAP_X
         row2_start_x = center_x - row2_total_w // 2
@@ -126,7 +126,7 @@ class Top10Poster:
                 x = row2_start_x + i * (CARD_SIZE + GAP_X)
                 self.draw_uniform_card(entry, r, x + CARD_SIZE // 2, row2_y, CARD_SIZE, color, 5, True)
         
-        # Row 3: 3 cards (3×280 + 60 = 900px ✅)
+        # Row 3: 3 cards (3×260 + 60 = 840px ✅)
         row3_y = row2_y + ROW_SPACING
         row3_total_w = 3 * CARD_SIZE + 2 * GAP_X
         row3_start_x = center_x - row3_total_w // 2
@@ -136,16 +136,14 @@ class Top10Poster:
                 x = row3_start_x + i * (CARD_SIZE + GAP_X)
                 self.draw_uniform_card(entry, r, x + CARD_SIZE // 2, row3_y, CARD_SIZE, '#FFFFFF', 4, False)
         
-        # Row 4: 4 cards (4×280 + 90 = 1210px ⚠️ 10px over!)
-        # Tighter gap: 23px → 4×280 + 69 = 1189px ✅
-        row4_gap = 23
+        # Row 4: 4 cards (4×260 + 90 = 1130px ✅)
         row4_y = row3_y + ROW_SPACING
-        row4_total_w = 4 * CARD_SIZE + 3 * row4_gap
+        row4_total_w = 4 * CARD_SIZE + 3 * GAP_X
         row4_start_x = center_x - row4_total_w // 2
         for i, r in enumerate([7, 8, 9, 10]):
             entry = next((e for e in entries if int(e.get('rank', 0)) == r), None)
             if entry:
-                x = row4_start_x + i * (CARD_SIZE + row4_gap)
+                x = row4_start_x + i * (CARD_SIZE + GAP_X)
                 self.draw_uniform_card(entry, r, x + CARD_SIZE // 2, row4_y, CARD_SIZE, '#FFFFFF', 3, False)
         
         # Bottom text
