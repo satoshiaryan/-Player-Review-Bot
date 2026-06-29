@@ -57,7 +57,6 @@ class Top10Poster:
         bbox = self.draw.textbbox((0, 0), name, font=base_font)
         if bbox[2] - bbox[0] <= max_width:
             return base_font
-        bbox = self.draw.textbbox((0, 0), name, font=self.font_name_small)
         return self.font_name_small
     
     def create_gradient_bg(self):
@@ -99,24 +98,24 @@ class Top10Poster:
         self.draw.text((self.width//2 - (bbox[2]-bbox[0])//2, 111), position, fill='#1a1a2e', font=self.font_rank)
         
         # =============================================
-        # === ALL CARDS 320x320 ===
+        # === ALL CARDS 290x290 ===
         # === 1-2-3-4 PYRAMID LAYOUT ===
         # =============================================
         
-        CARD_SIZE = 320
-        GAP_X = 30
-        GAP_Y = 12
-        START_Y = 175
-        ROW_SPACING = CARD_SIZE + GAP_Y + 48
+        CARD_SIZE = 290
+        GAP_X = 28
+        GAP_Y = 10
+        START_Y = 170
+        ROW_SPACING = CARD_SIZE + GAP_Y + 45
         
         center_x = self.width // 2
         
-        # Row 1: Rank 1 - 1 card
+        # Row 1: Rank 1 - 1 card (290px fits in 1200px ✅)
         rank1 = next((e for e in entries if int(e.get('rank', 0)) == 1), None)
         if rank1:
-            self.draw_uniform_card(rank1, 1, center_x, START_Y, CARD_SIZE, '#FFD700', 7, True)
+            self.draw_uniform_card(rank1, 1, center_x, START_Y, CARD_SIZE, '#FFD700', 6, True)
         
-        # Row 2: Ranks 2-3 - 2 cards
+        # Row 2: Ranks 2-3 - 2 cards (2×290 + 28 = 608px ✅)
         row2_y = START_Y + ROW_SPACING
         row2_total_w = 2 * CARD_SIZE + GAP_X
         row2_start_x = center_x - row2_total_w // 2
@@ -127,7 +126,7 @@ class Top10Poster:
                 x = row2_start_x + i * (CARD_SIZE + GAP_X)
                 self.draw_uniform_card(entry, r, x + CARD_SIZE // 2, row2_y, CARD_SIZE, color, 5, True)
         
-        # Row 3: Ranks 4-6 - 3 cards
+        # Row 3: Ranks 4-6 - 3 cards (3×290 + 56 = 926px ✅)
         row3_y = row2_y + ROW_SPACING
         row3_total_w = 3 * CARD_SIZE + 2 * GAP_X
         row3_start_x = center_x - row3_total_w // 2
@@ -137,14 +136,16 @@ class Top10Poster:
                 x = row3_start_x + i * (CARD_SIZE + GAP_X)
                 self.draw_uniform_card(entry, r, x + CARD_SIZE // 2, row3_y, CARD_SIZE, '#FFFFFF', 4, False)
         
-        # Row 4: Ranks 7-10 - 4 cards
+        # Row 4: Ranks 7-10 - 4 cards (4×290 + 84 = 1244px ⚠️ slightly over!)
+        # Need tighter gap: GAP_X = 20 for this row
+        row4_gap = 20
         row4_y = row3_y + ROW_SPACING
-        row4_total_w = 4 * CARD_SIZE + 3 * GAP_X
+        row4_total_w = 4 * CARD_SIZE + 3 * row4_gap
         row4_start_x = center_x - row4_total_w // 2
         for i, r in enumerate([7, 8, 9, 10]):
             entry = next((e for e in entries if int(e.get('rank', 0)) == r), None)
             if entry:
-                x = row4_start_x + i * (CARD_SIZE + GAP_X)
+                x = row4_start_x + i * (CARD_SIZE + row4_gap)
                 self.draw_uniform_card(entry, r, x + CARD_SIZE // 2, row4_y, CARD_SIZE, '#FFFFFF', 3, False)
         
         # Bottom text
@@ -158,7 +159,7 @@ class Top10Poster:
         return output
     
     def draw_uniform_card(self, entry, rank, center_x, y, card_size, border_color, border_width, is_top3):
-        """Draw a single 320x320 card"""
+        """Draw a single card"""
         card = self.load_card_image(entry)
         if not card:
             print(f"⚠️ No image for rank {rank}: {entry.get('player_name', 'Unknown')}")
@@ -170,18 +171,15 @@ class Top10Poster:
         card = card.resize((card_size, card_size))
         x = center_x - card_size // 2
         
-        # Card border
         self.draw_card_border(x, y, card_size, card_size, border_color, border_width)
         self.canvas.paste(card, (x + border_width - 1, y + border_width - 1), card)
         
-        # Name below card
         name_y = y + card_size + 6
         max_name_w = card_size + 40
         font = self.get_font_for_name(name, max_name_w, self.font_name_big if is_top3 else self.font_name_small)
         name_color = border_color if is_top3 else '#FFFFFF'
         self.draw.text((center_x, name_y), name, fill=name_color, font=font, anchor='mt')
         
-        # Rating
         rating_y = name_y + font.size + 4
         medal = "⭐ " if is_top3 else ""
         rank_text = f"{medal}{self.get_medal_text(rank)}  •  {rating}"
