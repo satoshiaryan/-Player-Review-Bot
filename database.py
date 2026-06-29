@@ -208,7 +208,7 @@ class Top10Database:
                                       badge_data TEXT DEFAULT NULL,
                                       updated_by TEXT,
                                       updated_at TIMESTAMP)''')
-                # Add badge_data column if missing
+                # Add badge_data column if missing (for existing databases)
                 for position in positions:
                     cursor.execute(f"PRAGMA table_info(top10_{position})")
                     cols = [c[1] for c in cursor.fetchall()]
@@ -242,18 +242,17 @@ class Top10Database:
                 with urllib.request.urlopen(req, timeout=10) as response:
                     badge_data = response.read()
                     badge_base64 = base64.b64encode(badge_data).decode('utf-8')
-            except:
-                pass
+                    print(f"✅ Downloaded badge: {len(badge_data)} bytes")
+            except Exception as e:
+                print(f"⚠️ Could not download badge: {e}")
         
         db_name = self.get_db_for_position(position)
         with sqlite3.connect(db_name) as conn:
             cursor = conn.cursor()
-            # Check if entry exists
             cursor.execute(f"SELECT rank FROM top10_{position} WHERE rank = ?", (rank,))
             exists = cursor.fetchone()
             
             if exists:
-                # Update existing, preserve badge if not providing new one
                 if badge_base64:
                     cursor.execute(f'''UPDATE top10_{position} 
                                      SET player_name=?, card_name=?, rating=?, image_url=?, image_data=?, badge_data=?, updated_by=?, updated_at=?
@@ -280,8 +279,13 @@ class Top10Database:
                 with urllib.request.urlopen(req, timeout=10) as response:
                     badge_data = response.read()
                     badge_base64 = base64.b64encode(badge_data).decode('utf-8')
-            except:
+                    print(f"✅ Downloaded badge: {len(badge_data)} bytes")
+            except Exception as e:
+                print(f"❌ Failed to download badge: {e}")
                 return False
+        
+        if not badge_base64:
+            return False
         
         db_name = self.get_db_for_position(position)
         with sqlite3.connect(db_name) as conn:
@@ -289,6 +293,7 @@ class Top10Database:
             cursor.execute(f"UPDATE top10_{position} SET badge_data = ?, updated_at = ? WHERE rank = ?",
                           (badge_base64, datetime.now().isoformat(), rank))
             conn.commit()
+            print(f"✅ Badge saved for {position} #{rank}")
             return cursor.rowcount > 0
     
     def remove_top10_entry(self, position: str, rank: int) -> bool:
