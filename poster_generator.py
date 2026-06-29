@@ -110,12 +110,12 @@ class Top10Poster:
         
         center_x = self.width // 2
         
-        # Row 1: 1 card (260px ✅)
+        # Row 1: 1 card
         rank1 = next((e for e in entries if int(e.get('rank', 0)) == 1), None)
         if rank1:
             self.draw_uniform_card(rank1, 1, center_x, START_Y, CARD_SIZE, '#FFD700', 6, True)
         
-        # Row 2: 2 cards (2×260 + 30 = 550px ✅)
+        # Row 2: 2 cards
         row2_y = START_Y + ROW_SPACING
         row2_total_w = 2 * CARD_SIZE + GAP_X
         row2_start_x = center_x - row2_total_w // 2
@@ -126,7 +126,7 @@ class Top10Poster:
                 x = row2_start_x + i * (CARD_SIZE + GAP_X)
                 self.draw_uniform_card(entry, r, x + CARD_SIZE // 2, row2_y, CARD_SIZE, color, 5, True)
         
-        # Row 3: 3 cards (3×260 + 60 = 840px ✅)
+        # Row 3: 3 cards
         row3_y = row2_y + ROW_SPACING
         row3_total_w = 3 * CARD_SIZE + 2 * GAP_X
         row3_start_x = center_x - row3_total_w // 2
@@ -136,7 +136,7 @@ class Top10Poster:
                 x = row3_start_x + i * (CARD_SIZE + GAP_X)
                 self.draw_uniform_card(entry, r, x + CARD_SIZE // 2, row3_y, CARD_SIZE, '#FFFFFF', 4, False)
         
-        # Row 4: 4 cards (4×260 + 90 = 1130px ✅)
+        # Row 4: 4 cards
         row4_y = row3_y + ROW_SPACING
         row4_total_w = 4 * CARD_SIZE + 3 * GAP_X
         row4_start_x = center_x - row4_total_w // 2
@@ -157,7 +157,7 @@ class Top10Poster:
         return output
     
     def draw_uniform_card(self, entry, rank, center_x, y, card_size, border_color, border_width, is_top3):
-        """Draw a single card"""
+        """Draw a single card with optional playstyle badge"""
         card = self.load_card_image(entry)
         if not card:
             print(f"⚠️ No image for rank {rank}: {entry.get('player_name', 'Unknown')}")
@@ -171,6 +171,15 @@ class Top10Poster:
         
         self.draw_card_border(x, y, card_size, card_size, border_color, border_width)
         self.canvas.paste(card, (x + border_width - 1, y + border_width - 1), card)
+        
+        # === PLAYSTYLE BADGE (left-middle of card) ===
+        badge = self.load_badge_image(entry)
+        if badge:
+            badge_size = 50
+            badge = badge.resize((badge_size, badge_size))
+            badge_x = x + 5
+            badge_y = y + (card_size - badge_size) // 2
+            self.canvas.paste(badge, (badge_x, badge_y), badge)
         
         name_y = y + card_size + 6
         max_name_w = card_size + 40
@@ -198,6 +207,20 @@ class Top10Poster:
                 print(f"⚠️ No image_data for rank {entry.get('rank')}: {entry.get('player_name')}")
         except Exception as e:
             print(f"❌ Load failed for rank {entry.get('rank')}: {e}")
+        return None
+    
+    def load_badge_image(self, entry):
+        """Load playstyle badge from base64 data"""
+        try:
+            badge_data = entry.get('badge_data')
+            if badge_data:
+                badge_bytes = base64.b64decode(badge_data)
+                img = Image.open(io.BytesIO(badge_bytes))
+                if img.mode != 'RGBA':
+                    img = img.convert('RGBA')
+                return img
+        except:
+            pass
         return None
     
     def draw_card_border(self, x, y, w, h, color, width):
