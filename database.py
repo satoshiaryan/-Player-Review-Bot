@@ -242,9 +242,8 @@ class Top10Database:
                 with urllib.request.urlopen(req, timeout=10) as response:
                     badge_data = response.read()
                     badge_base64 = base64.b64encode(badge_data).decode('utf-8')
-                    print(f"✅ Downloaded badge: {len(badge_data)} bytes")
-            except Exception as e:
-                print(f"⚠️ Could not download badge: {e}")
+            except:
+                pass
         
         db_name = self.get_db_for_position(position)
         with sqlite3.connect(db_name) as conn:
@@ -279,7 +278,6 @@ class Top10Database:
                 with urllib.request.urlopen(req, timeout=10) as response:
                     badge_data = response.read()
                     badge_base64 = base64.b64encode(badge_data).decode('utf-8')
-                    print(f"✅ Downloaded badge: {len(badge_data)} bytes")
             except Exception as e:
                 print(f"❌ Failed to download badge: {e}")
                 return False
@@ -293,7 +291,6 @@ class Top10Database:
             cursor.execute(f"UPDATE top10_{position} SET badge_data = ?, updated_at = ? WHERE rank = ?",
                           (badge_base64, datetime.now().isoformat(), rank))
             conn.commit()
-            print(f"✅ Badge saved for {position} #{rank}")
             return cursor.rowcount > 0
     
     def remove_top10_entry(self, position: str, rank: int) -> bool:
@@ -313,9 +310,15 @@ class Top10Database:
             cursor.execute(f"SELECT * FROM top10_{position} WHERE rank = ?", (rank2,))
             entry2 = cursor.fetchone()
             if entry1 and entry2:
-                cursor.execute(f"UPDATE top10_{position} SET player_name=?, card_name=?, rating=?, image_url=?, image_data=?, badge_data=?, updated_by=?, updated_at=? WHERE rank=?",
+                # entry layout: rank, player_name, card_name, rating, image_url, image_data, badge_data, updated_by, updated_at
+                # indexes:      0      1            2          3        4           5           6           7          8
+                cursor.execute(f'''UPDATE top10_{position} 
+                                 SET player_name=?, card_name=?, rating=?, image_url=?, image_data=?, badge_data=?, updated_by=?, updated_at=?
+                                 WHERE rank=?''',
                               (entry2[1], entry2[2], entry2[3], entry2[4], entry2[5], entry2[6], "system", datetime.now().isoformat(), rank1))
-                cursor.execute(f"UPDATE top10_{position} SET player_name=?, card_name=?, rating=?, image_url=?, image_data=?, badge_data=?, updated_by=?, updated_at=? WHERE rank=?",
+                cursor.execute(f'''UPDATE top10_{position} 
+                                 SET player_name=?, card_name=?, rating=?, image_url=?, image_data=?, badge_data=?, updated_by=?, updated_at=?
+                                 WHERE rank=?''',
                               (entry1[1], entry1[2], entry1[3], entry1[4], entry1[5], entry1[6], "system", datetime.now().isoformat(), rank2))
                 conn.commit()
                 return True
