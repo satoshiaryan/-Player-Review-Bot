@@ -304,18 +304,51 @@ async def top10_view(interaction: discord.Interaction, position: str):
 @bot.tree.command(name="top10_add", description="Add player to Top 10 (Owner/Admin)")
 @maintenance_check()
 @app_commands.describe(position="Position", rank="Rank (1-10)", player_name="Player name",
-    rating="Rating (e.g., 117 OVR)", image="Card image")
+    rating="Rating (e.g., 117 OVR)", image="Card image", 
+    badge1="Optional: First playstyle badge", badge2="Optional: Second playstyle badge")
 @app_commands.choices(position=ALL_POSITIONS)
 async def top10_add(interaction: discord.Interaction, position: str, rank: int,
-    player_name: str, rating: str, image: discord.Attachment):
+    player_name: str, rating: str, image: discord.Attachment,
+    badge1: discord.Attachment = None, badge2: discord.Attachment = None):
+    
     if not can_edit_top10(interaction.user.id):
         await interaction.response.send_message("❌ No permission!", ephemeral=True); return
     if rank < 1 or rank > 10:
         await interaction.response.send_message("❌ Rank 1-10!", ephemeral=True); return
+    
     await interaction.response.defer(ephemeral=True)
-    if top10_db.add_top10_entry(position, rank, player_name, "", rating, image.url, interaction.user.name):
+    
+    badge1_url = badge1.url if badge1 else None
+    badge2_url = badge2.url if badge2 else None
+    
+    if top10_db.add_top10_entry(position, rank, player_name, "", rating, image.url, interaction.user.name, badge1_url, badge2_url):
         await interaction.followup.send(f"✅ **{player_name}** added to {position} #{rank}!", ephemeral=True)
-    else: await interaction.followup.send("❌ Failed!", ephemeral=True)
+    else: 
+        await interaction.followup.send("❌ Failed!", ephemeral=True)
+
+@bot.tree.command(name="top10_add_badges", description="Add badges to existing Top 10 player (Owner/Admin)")
+@maintenance_check()
+@app_commands.describe(position="Position", rank="Rank to update", 
+    badge1="First playstyle badge", badge2="Second playstyle badge")
+@app_commands.choices(position=ALL_POSITIONS)
+async def top10_add_badges(interaction: discord.Interaction, position: str, rank: int,
+    badge1: discord.Attachment = None, badge2: discord.Attachment = None):
+    
+    if not can_edit_top10(interaction.user.id):
+        await interaction.response.send_message("❌ No permission!", ephemeral=True); return
+    
+    if not badge1 and not badge2:
+        await interaction.response.send_message("❌ You must provide at least one badge!", ephemeral=True); return
+        
+    await interaction.response.defer(ephemeral=True)
+    
+    badge1_url = badge1.url if badge1 else None
+    badge2_url = badge2.url if badge2 else None
+    
+    if top10_db.update_top10_badges(position, rank, badge1_url, badge2_url):
+        await interaction.followup.send(f"✅ Badges updated for {position} #{rank}!", ephemeral=True)
+    else:
+        await interaction.followup.send(f"❌ Failed! Is there a player at {position} #{rank}?", ephemeral=True)
 
 @bot.tree.command(name="top10_remove", description="Remove player (Owner/Admin)")
 @maintenance_check()
@@ -546,7 +579,7 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="⚽ `/review_outfield`", value="Create outfield review", inline=False)
     embed.add_field(name="🧤 `/review_gk`", value="Create GK review", inline=False)
     embed.add_field(name="🏆 `/top10 <pos>`", value="View Top 10 poster", inline=False)
-    embed.add_field(name="🔧 Top 10 Mgmt", value="`/top10_add` `/top10_remove` `/top10_swap`\n`/top10_debug` `/top10_clear` `/top10_import`", inline=False)
+    embed.add_field(name="🔧 Top 10 Mgmt", value="`/top10_add` `/top10_add_badges` `/top10_remove` `/top10_swap`\n`/top10_debug` `/top10_clear` `/top10_import`", inline=False)
     embed.add_field(name="🖼️ `/update_image`", value="Update card image", inline=False)
     embed.add_field(name="🔍 `/search`", value="Search reviews", inline=False)
     embed.add_field(name="📋 `/list_reviews`", value="List all reviews", inline=False)
