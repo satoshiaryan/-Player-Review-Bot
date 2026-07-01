@@ -157,7 +157,7 @@ class Top10Poster:
         return output
     
     def draw_uniform_card(self, entry, rank, center_x, y, card_size, border_color, border_width, is_top3):
-        """Draw a single card"""
+        """Draw a single card with optional playstyle badges on the left border"""
         card = self.load_card_image(entry)
         if not card:
             print(f"⚠️ No image for rank {rank}: {entry.get('player_name', 'Unknown')}")
@@ -172,6 +172,38 @@ class Top10Poster:
         self.draw_card_border(x, y, card_size, card_size, border_color, border_width)
         self.canvas.paste(card, (x + border_width - 1, y + border_width - 1), card)
         
+        # --- NEW BADGE LOGIC ---
+        badges = []
+        badge_target_size = (36, 36) # Resized down from 256x256 to fit border nicely
+        
+        if entry.get('badge1_data'):
+            b1 = self.load_badge_image(entry['badge1_data'], badge_target_size)
+            if b1: badges.append(b1)
+            
+        if entry.get('badge2_data'):
+            b2 = self.load_badge_image(entry['badge2_data'], badge_target_size)
+            if b2: badges.append(b2)
+
+        if badges:
+            # We want them centered on the left border
+            # X position: Card's left edge minus half the badge size so it straddles the border
+            badge_x = x - (badge_target_size[0] // 2)
+            
+            # Y position: Center of the card height
+            center_y = y + (card_size // 2)
+            
+            if len(badges) == 1:
+                badge_y = center_y - (badge_target_size[1] // 2)
+                self.canvas.paste(badges[0], (badge_x, badge_y), badges[0])
+            elif len(badges) == 2:
+                spacing = 10 # Pixels between the two stacked badges
+                total_height = (badge_target_size[1] * 2) + spacing
+                start_y = center_y - (total_height // 2)
+                
+                self.canvas.paste(badges[0], (badge_x, start_y), badges[0])
+                self.canvas.paste(badges[1], (badge_x, start_y + badge_target_size[1] + spacing), badges[1])
+        # ------------------------
+        
         name_y = y + card_size + 6
         max_name_w = card_size + 40
         font = self.get_font_for_name(name, max_name_w, self.font_name_big if is_top3 else self.font_name_small)
@@ -184,7 +216,7 @@ class Top10Poster:
         rating_color = '#FFFFFF' if is_top3 else '#CCCCCC'
         rating_font = self.font_rating if is_top3 else self.font_rating_small
         self.draw.text((center_x, rating_y), rank_text, fill=rating_color, font=rating_font, anchor='mt')
-    
+
     def load_card_image(self, entry):
         try:
             image_data = entry.get('image_data')
@@ -199,6 +231,16 @@ class Top10Poster:
         except Exception as e:
             print(f"❌ Load failed for rank {entry.get('rank')}: {e}")
         return None
+        
+    def load_badge_image(self, base64_data, target_size):
+        """Helper to decode and resize badge images for the borders"""
+        try:
+            image_bytes = base64.b64decode(base64_data)
+            img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+            return img.resize(target_size, Image.Resampling.LANCZOS)
+        except Exception as e:
+            print(f"❌ Badge load failed: {e}")
+            return None
     
     def draw_card_border(self, x, y, w, h, color, width):
         self.draw.rounded_rectangle(
