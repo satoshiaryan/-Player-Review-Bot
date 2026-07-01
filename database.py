@@ -7,7 +7,7 @@ import base64
 import urllib.request
 from datetime import datetime
 from typing import Optional, List, Dict, Any
- 
+
 class Database:
     def __init__(self, db_path: str = "fcm_reviews.db"):
         self.db_path = db_path
@@ -199,15 +199,33 @@ class Top10Database:
             with sqlite3.connect(db_name) as conn:
                 cursor = conn.cursor()
                 for position in positions:
-                    cursor.execute(f'''CREATE TABLE IF NOT EXISTS top10_{position}
+                    table_name = f"top10_{position}"
+                    cursor.execute(f'''CREATE TABLE IF NOT EXISTS {table_name}
                                      (rank INTEGER PRIMARY KEY,
                                       player_name TEXT,
                                       card_name TEXT,
                                       rating TEXT,
                                       image_url TEXT,
                                       image_data TEXT DEFAULT NULL,
+                                      badge1_url TEXT DEFAULT NULL,
+                                      badge1_data TEXT DEFAULT NULL,
+                                      badge2_url TEXT DEFAULT NULL,
+                                      badge2_data TEXT DEFAULT NULL,
                                       updated_by TEXT,
                                       updated_at TIMESTAMP)''')
+                    
+                    # Safe check to add new badge columns to existing tables
+                    cursor.execute(f"PRAGMA table_info({table_name})")
+                    columns = [col[1] for col in cursor.fetchall()]
+                    
+                    if 'badge1_url' not in columns:
+                        cursor.execute(f'ALTER TABLE {table_name} ADD COLUMN badge1_url TEXT DEFAULT NULL')
+                    if 'badge1_data' not in columns:
+                        cursor.execute(f'ALTER TABLE {table_name} ADD COLUMN badge1_data TEXT DEFAULT NULL')
+                    if 'badge2_url' not in columns:
+                        cursor.execute(f'ALTER TABLE {table_name} ADD COLUMN badge2_url TEXT DEFAULT NULL')
+                    if 'badge2_data' not in columns:
+                        cursor.execute(f'ALTER TABLE {table_name} ADD COLUMN badge2_data TEXT DEFAULT NULL')
     
     def get_top10(self, position: str):
         db_name = self.get_db_for_position(position)
@@ -216,27 +234,47 @@ class Top10Database:
             cursor = conn.cursor()
             cursor.execute(f"SELECT * FROM top10_{position} ORDER BY CAST(rank AS INTEGER)")
             return [dict(row) for row in cursor.fetchall()]
+            
+    def _download_to_base64(self, url: str) -> Optional[str]:
+        """Helper to download an image and return base64 string"""
+        if not url: return None
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=10) as response:
+                image_data = response.read()
+                return base64.b64encode(image_data).decode('utf-8')
+        except:
+            return None
     
-    def add_top10_entry(self, position: str, rank: int, player_name: str, card_name: str, rating: str, image_url: str, updated_by: str) -> bool:
-        image_base64 = None
-        if image_url:
-            try:
-                req = urllib.request.Request(image_url, headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(req, timeout=10) as response:
-                    image_data = response.read()
-                    image_base64 = base64.b64encode(image_data).decode('utf-8')
-            except:
-                pass
+    def add_top10_entry(self, position: str, rank: int, player_name: str, card_name: str, rating: str, image_url: str, updated_by: str, badge1_url: str = None, badge2_url: str = None) -> bool:
+        image_base64 = self._download_to_base64(image_url)
+        badge1_base64 = self._download_to_base64(badge1_url)
+        badge2_base64 = self._download_to_base64(badge2_url)
         
         db_name = self.get_db_for_position(position)
         with sqlite3.connect(db_name) as conn:
             cursor = conn.cursor()
             cursor.execute(f'''INSERT OR REPLACE INTO top10_{position} 
-                             (rank, player_name, card_name, rating, image_url, image_data, updated_by, updated_at)
-                             VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-                          (rank, player_name, card_name, rating, image_url, image_base64, updated_by, datetime.now().isoformat()))
+                             (rank, player_name, card_name, rating, image_url, image_data, badge1_url, badge1_data, badge2_url, badge2_data, updated_by, updated_at)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                          (rank, player_name, card_name, rating, image_url, image_base64, badge1_url, badge1_base64, badge2_url, badge2_base64, updated_by, datetime.now().isoformat()))
             conn.commit()
         return True
+
+    def update_top10_badges(self, position: str, rank: int, badge1_url: str = None, badge2_url: str = None) -> bool:
+        """New method specifically for adding/updating badges of an existing Top 10 entry"""
+        badge1_base64 = self._download_to_base64(badge1_url)
+        badge2_base64 = self._download_to_base64(badge2_url)
+        
+        db_name = self.get_db_for_position(position)
+        with sqlite3.connect(db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute(f'''UPDATE top10_{position} 
+                               SET badge1_url=?, badge1_data=?, badge2_url=?, badge2_data=?, updated_at=?
+                               WHERE rank=?''', 
+                           (badge1_url, badge1_base64, badge2_url, badge2_base64, datetime.now().isoformat(), rank))
+            conn.commit()
+            return cursor.rowcount > 0
     
     def remove_top10_entry(self, position: str, rank: int) -> bool:
         db_name = self.get_db_for_position(position)
@@ -250,15 +288,26 @@ class Top10Database:
         db_name = self.get_db_for_position(position)
         with sqlite3.connect(db_name) as conn:
             cursor = conn.cursor()
-            cursor.execute(f"SELECT * FROM top10_{position} WHERE rank = ?", (rank1,))
+            # Fetch specifically to avoid schema ordering issues
+            columns_to_fetch = "player_name, card_name, rating, image_url, image_data, badge1_url, badge1_data, badge2_url, badge2_data"
+            
+            cursor.execute(f"SELECT {columns_to_fetch} FROM top10_{position} WHERE rank = ?", (rank1,))
             entry1 = cursor.fetchone()
-            cursor.execute(f"SELECT * FROM top10_{position} WHERE rank = ?", (rank2,))
+            
+            cursor.execute(f"SELECT {columns_to_fetch} FROM top10_{position} WHERE rank = ?", (rank2,))
             entry2 = cursor.fetchone()
+            
             if entry1 and entry2:
-                cursor.execute(f"UPDATE top10_{position} SET player_name=?, card_name=?, rating=?, image_url=?, image_data=?, updated_by=?, updated_at=? WHERE rank=?",
-                              (entry2[1], entry2[2], entry2[3], entry2[4], entry2[5], "system", datetime.now().isoformat(), rank1))
-                cursor.execute(f"UPDATE top10_{position} SET player_name=?, card_name=?, rating=?, image_url=?, image_data=?, updated_by=?, updated_at=? WHERE rank=?",
-                              (entry1[1], entry1[2], entry1[3], entry1[4], entry1[5], "system", datetime.now().isoformat(), rank2))
+                update_query = f'''UPDATE top10_{position} 
+                                   SET player_name=?, card_name=?, rating=?, image_url=?, image_data=?, 
+                                       badge1_url=?, badge1_data=?, badge2_url=?, badge2_data=?, 
+                                       updated_by=?, updated_at=? WHERE rank=?'''
+                
+                # Unpack entry2 data into rank1's spot
+                cursor.execute(update_query, (*entry2, "system", datetime.now().isoformat(), rank1))
+                # Unpack entry1 data into rank2's spot
+                cursor.execute(update_query, (*entry1, "system", datetime.now().isoformat(), rank2))
+                
                 conn.commit()
                 return True
         return False
