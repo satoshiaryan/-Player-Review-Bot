@@ -183,6 +183,43 @@ async def maintenance_cmd(interaction: discord.Interaction, status: str):
     await interaction.response.send_message(embed=embed)
 
 # =============================================
+# === ANNOUNCE TOP 10 COMMAND ===
+# =============================================
+
+@bot.tree.command(name="announce_top10", description="Announce Top 10 update in a channel (Owner Only)")
+@app_commands.describe(channel="Channel to send the announcement to")
+async def announce_top10(interaction: discord.Interaction, channel: discord.TextChannel):
+    if not is_bot_owner(interaction.user.id):
+        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    embed = discord.Embed(
+        title="🏆 **Top 10 List Updated!**",
+        description=(
+            "Hey <@&1391671055902572625>! The **Top 10 Players** list has been refreshed! 📊\n\n"
+            "## 📋 **Updated Positions:**\n"
+            "✅ All 12 positions have been updated:\n"
+            "`GK` `LB` `RB` `CB` `CM` `CDM` `CAM` `LM` `RM` `LW` `RW` `ST`\n\n"
+            "## 🔍 **Check it out:**\n"
+            "```\n/top10 [position]\n```\n"
+            "New Update on Top 10 lists: All P2W cards removed i.e, no more box cards in any lists.\n\n"
+            "## 📅 **Next Update:**\n"
+            "Next Saturday or Sunday or Monday, before 10 PM IST\n\n"
+            "Thanks to the <@&1484603567057666219> for their work on the lists! 👏\n\n"
+            "Stay updated on the meta! ⚽"
+        ),
+        color=0xF5A623
+    )
+    embed.set_footer(text="FELIX PR | Top 10 Announcement")
+    
+    try:
+        await channel.send(embed=embed)
+        await interaction.followup.send(f"✅ Announcement sent to {channel.mention}!", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Failed to send: {e}", ephemeral=True)
+
+# =============================================
 # === REVIEW COMMANDS (Require Reviewer Role) ===
 # =============================================
 
@@ -580,6 +617,7 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="🧤 `/review_gk`", value="Create GK review", inline=False)
     embed.add_field(name="🏆 `/top10 <pos>`", value="View Top 10 poster", inline=False)
     embed.add_field(name="🔧 Top 10 Mgmt", value="`/top10_add` `/top10_add_badges` `/top10_remove` `/top10_swap`\n`/top10_debug` `/top10_clear` `/top10_import`", inline=False)
+    embed.add_field(name="📢 `/announce_top10`", value="Announce Top 10 update in a channel (Owner)", inline=False)
     embed.add_field(name="🖼️ `/update_image`", value="Update card image", inline=False)
     embed.add_field(name="🔍 `/search`", value="Search reviews", inline=False)
     embed.add_field(name="📋 `/list_reviews`", value="List all reviews", inline=False)
