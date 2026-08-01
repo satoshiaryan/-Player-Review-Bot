@@ -47,10 +47,11 @@ async def self_ping():
 load_dotenv()
 
 BOT_OWNER_ID = 1214456066687893506
+CO_OWNER_ID = 553418145063239684
 CONFIG_FILE = "bot_config.json"
 
-# === MAINTENANCE MODE (ON BY DEFAULT) ===
-maintenance_mode = True
+# === MAINTENANCE MODE (OFF BY DEFAULT NOW) ===
+maintenance_mode = False
 
 class BotConfig:
     def __init__(self):
@@ -70,7 +71,7 @@ shard_db = ShardDatabase()
 # --- Maintenance Check Decorator ---
 def maintenance_check():
     async def predicate(interaction: discord.Interaction) -> bool:
-        if maintenance_mode and not is_bot_owner(interaction.user.id):
+        if maintenance_mode and not is_bot_owner(interaction.user.id) and not is_co_owner(interaction.user.id):
             await interaction.response.send_message(
                 "🔧 **Bot is under maintenance now, please wait.**\n\n"
                 "The bot owner is currently making updates.\n"
@@ -80,6 +81,75 @@ def maintenance_check():
             return False
         return True
     return app_commands.check(predicate)
+
+class ShardGuideView(discord.ui.View):
+    def __init__(self, players: list, page: int = 0):
+        super().__init__(timeout=120)
+        self.players = players
+        self.page = page
+        self.total_pages = len(players)
+        self.update_buttons()
+    
+    def update_buttons(self):
+        self.clear_items()
+        
+        prev_btn = discord.ui.Button(label="◀ Previous", style=discord.ButtonStyle.secondary, 
+                                     disabled=(self.page == 0))
+        prev_btn.callback = self.prev_callback
+        self.add_item(prev_btn)
+        
+        page_btn = discord.ui.Button(label=f"{self.page + 1}/{self.total_pages}", 
+                                     style=discord.ButtonStyle.primary, disabled=True)
+        self.add_item(page_btn)
+        
+        next_btn = discord.ui.Button(label="Next ▶", style=discord.ButtonStyle.secondary,
+                                     disabled=(self.page + 1 >= self.total_pages))
+        next_btn.callback = self.next_callback
+        self.add_item(next_btn)
+    
+    async def prev_callback(self, interaction: discord.Interaction):
+        self.page -= 1
+        self.update_buttons()
+        embed, file = self.get_player_embed()
+        if file:
+            await interaction.response.edit_message(embed=embed, attachments=[file], view=self)
+        else:
+            await interaction.response.edit_message(embed=embed, view=self)
+    
+    async def next_callback(self, interaction: discord.Interaction):
+        self.page += 1
+        self.update_buttons()
+        embed, file = self.get_player_embed()
+        if file:
+            await interaction.response.edit_message(embed=embed, attachments=[file], view=self)
+        else:
+            await interaction.response.edit_message(embed=embed, view=self)
+    
+    def get_player_embed(self):
+        p = self.players[self.page]
+        color = TIER_COLOR.get(p['value_tier'], 0x3498db)
+        emoji = TIER_EMOJI.get(p['value_tier'], "")
+        
+        embed = discord.Embed(
+            title=f"{emoji} {p['player_name']}",
+            description=f"**OVR:** {p['ovr']}\n**Cost:** `{p['shard_cost']}` shards\n"
+                         f"**Tier:** {emoji} `{p['value_tier']}`\n\n"
+                         f"Player {self.page + 1} of {self.total_pages}",
+            color=color
+        )
+        embed.set_footer(text="FELIX PR | Shard Guide • Use buttons to navigate")
+        
+        file = None
+        if p.get('image_data'):
+            try:
+                img_bytes = base64.b64decode(p['image_data'])
+                file = discord.File(io.BytesIO(img_bytes), filename=f"shard_{p['id']}.png")
+                embed.set_image(url=f"attachment://shard_{p['id']}.png")
+            except:
+                pass
+        
+        return embed, file
+
 
 class FCMReviewBot(commands.Bot):
     def __init__(self):
@@ -93,7 +163,9 @@ class FCMReviewBot(commands.Bot):
 bot = FCMReviewBot()
 
 def is_bot_owner(uid: int) -> bool: return uid == BOT_OWNER_ID
-def can_edit_top10(uid: int) -> bool: return uid == BOT_OWNER_ID or uid in [553418145063239684]
+def is_co_owner(uid: int) -> bool: return uid == CO_OWNER_ID
+def is_admin(uid: int) -> bool: return is_bot_owner(uid) or is_co_owner(uid)
+def can_edit_top10(uid: int) -> bool: return is_admin(uid)
 
 # Value tier emojis and colors
 TIER_EMOJI = {
@@ -108,29 +180,30 @@ async def on_ready():
     print(f'✅ Logged in as {bot.user}')
     print(f'🏆 Top 10: Active (4+4+4 DB Split)')
     print(f'💎 Shard Guide: Active')
-    print(f'🔧 Maintenance Mode: {"🟢 ON" if maintenance_mode else "🟢 OFF"} (Default: ON)')
+    print(f'🔧 Maintenance Mode: {"🟢 ON" if maintenance_mode else "🟢 OFF"}')
+    print(f'👑 Admins: {BOT_OWNER_ID}, {CO_OWNER_ID}')
     bot.loop.create_task(self_ping())
 
 # =============================================
 # === MAINTENANCE COMMAND ===
 # =============================================
 
-@bot.tree.command(name="maintenance", description="Toggle maintenance mode (Owner Only)")
+@bot.tree.command(name="maintenance", description="Toggle maintenance mode (Admin Only)")
 @app_commands.describe(status="ON or OFF")
 @app_commands.choices(status=[
     app_commands.Choice(name="ON - Lock bot for everyone else", value="on"),
     app_commands.Choice(name="OFF - Unlock bot", value="off"),
 ])
 async def maintenance_cmd(interaction: discord.Interaction, status: str):
-    if not is_bot_owner(interaction.user.id):
-        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
+    if not is_admin(interaction.user.id):
+        await interaction.response.send_message("❌ Admin only!", ephemeral=True); return
     
     global maintenance_mode
     maintenance_mode = (status == "on")
     
     embed = discord.Embed(
         title=f"🔧 Maintenance Mode: {'🟢 ON' if maintenance_mode else '🟢 OFF'}",
-        description="Only the bot owner can use commands when maintenance is ON." if maintenance_mode else "All users can use commands now.",
+        description="Only admins can use commands when maintenance is ON." if maintenance_mode else "All users can use commands now.",
         color=0xF59E0B if maintenance_mode else 0x2ecc71
     )
     embed.set_footer(text="FELIX PR")
@@ -140,11 +213,11 @@ async def maintenance_cmd(interaction: discord.Interaction, status: str):
 # === ANNOUNCE TOP 10 COMMAND ===
 # =============================================
 
-@bot.tree.command(name="announce_top10", description="Announce Top 10 update in a channel (Owner Only)")
+@bot.tree.command(name="announce_top10", description="Announce Top 10 update in a channel (Admin Only)")
 @app_commands.describe(channel="Channel to send the announcement to")
 async def announce_top10(interaction: discord.Interaction, channel: discord.TextChannel):
-    if not is_bot_owner(interaction.user.id):
-        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
+    if not is_admin(interaction.user.id):
+        await interaction.response.send_message("❌ Admin only!", ephemeral=True); return
     
     await interaction.response.defer(ephemeral=True)
     
@@ -177,7 +250,7 @@ async def announce_top10(interaction: discord.Interaction, channel: discord.Text
 # === SHARD GUIDE COMMANDS ===
 # =============================================
 
-@bot.tree.command(name="shard_add", description="Add player to Shard Value Guide (Owner Only)")
+@bot.tree.command(name="shard_add", description="Add player to Shard Value Guide (Admin Only)")
 @maintenance_check()
 @app_commands.describe(
     player_name="Player name",
@@ -196,8 +269,8 @@ async def announce_top10(interaction: discord.Interaction, channel: discord.Text
 async def shard_add(interaction: discord.Interaction, player_name: str, ovr: str,
     shard_cost: int, value_tier: str, image: discord.Attachment):
     
-    if not is_bot_owner(interaction.user.id):
-        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
+    if not is_admin(interaction.user.id):
+        await interaction.response.send_message("❌ Admin only!", ephemeral=True); return
     
     await interaction.response.defer(ephemeral=True)
     
@@ -210,7 +283,7 @@ async def shard_add(interaction: discord.Interaction, player_name: str, ovr: str
     else:
         await interaction.followup.send("❌ Failed to add player!", ephemeral=True)
 
-@bot.tree.command(name="shard_guide", description="View the Shard Value Guide")
+@bot.tree.command(name="shard_guide", description="View the Shard Value Guide with pagination")
 @maintenance_check()
 async def shard_guide(interaction: discord.Interaction):
     await interaction.response.defer()
@@ -223,57 +296,31 @@ async def shard_guide(interaction: discord.Interaction):
             color=0x3498db).set_footer(text="FELIX PR"))
         return
     
-    # Header embed
-    header = discord.Embed(
-        title="💎 Shard Value Guide",
-        description=f"**{len(players)} players** available this week\n"
-                     "🌟 S = Must Buy | 🟢 A = Great | 🟡 B = Good | 🟠 C = Decent | 🔴 D = Skip\n"
-                     "━━━━━━━━━━━━━━━━━━━━━━━━",
-        color=0x3498db
-    )
-    header.set_footer(text="FELIX PR | Shard Guide • Updated Weekly")
-    await interaction.followup.send(embed=header)
+    view = ShardGuideView(players)
+    embed, file = view.get_player_embed()
     
-    # Send each player with image
-    for p in players:
-        color = TIER_COLOR.get(p['value_tier'], 0x3498db)
-        emoji = TIER_EMOJI.get(p['value_tier'], "")
-        
-        embed = discord.Embed(
-            title=f"{emoji} {p['player_name']}",
-            description=f"**OVR:** {p['ovr']}\n**Cost:** `{p['shard_cost']}` shards\n"
-                         f"**Tier:** {emoji} `{p['value_tier']}`",
-            color=color
-        )
-        
-        if p.get('image_data'):
-            try:
-                img_bytes = base64.b64decode(p['image_data'])
-                img_file = discord.File(io.BytesIO(img_bytes), filename=f"shard_{p['id']}.png")
-                embed.set_image(url=f"attachment://shard_{p['id']}.png")
-                await interaction.channel.send(embed=embed, file=img_file)
-            except:
-                await interaction.channel.send(embed=embed)
-        else:
-            await interaction.channel.send(embed=embed)
+    if file:
+        await interaction.followup.send(embed=embed, file=file, view=view)
+    else:
+        await interaction.followup.send(embed=embed, view=view)
 
-@bot.tree.command(name="shard_remove", description="Remove player from Shard Guide (Owner Only)")
+@bot.tree.command(name="shard_remove", description="Remove player from Shard Guide (Admin Only)")
 @maintenance_check()
 @app_commands.describe(player_id="ID of player to remove")
 async def shard_remove(interaction: discord.Interaction, player_id: int):
-    if not is_bot_owner(interaction.user.id):
-        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
+    if not is_admin(interaction.user.id):
+        await interaction.response.send_message("❌ Admin only!", ephemeral=True); return
     
     if shard_db.remove_player(player_id):
         await interaction.response.send_message(f"✅ Removed player `{player_id}` from Shard Guide!", ephemeral=True)
     else:
         await interaction.response.send_message(f"❌ No player with ID `{player_id}`!", ephemeral=True)
 
-@bot.tree.command(name="shard_reset", description="Reset entire Shard Guide for new week (Owner Only)")
+@bot.tree.command(name="shard_reset", description="Reset entire Shard Guide for new week (Admin Only)")
 @maintenance_check()
 async def shard_reset(interaction: discord.Interaction):
-    if not is_bot_owner(interaction.user.id):
-        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
+    if not is_admin(interaction.user.id):
+        await interaction.response.send_message("❌ Admin only!", ephemeral=True); return
     
     await interaction.response.defer(ephemeral=True)
     
@@ -320,7 +367,7 @@ async def top10_view(interaction: discord.Interaction, position: str):
     except Exception as e:
         await interaction.followup.send(f"❌ Error: {e}")
 
-@bot.tree.command(name="top10_add", description="Add player to Top 10 (Owner/Admin)")
+@bot.tree.command(name="top10_add", description="Add player to Top 10 (Admin Only)")
 @maintenance_check()
 @app_commands.describe(position="Position", rank="Rank (1-10)", player_name="Player name",
     rating="Rating (e.g., 117 OVR)", image="Card image", 
@@ -331,7 +378,7 @@ async def top10_add(interaction: discord.Interaction, position: str, rank: int,
     badge1: discord.Attachment = None, badge2: discord.Attachment = None):
     
     if not can_edit_top10(interaction.user.id):
-        await interaction.response.send_message("❌ No permission!", ephemeral=True); return
+        await interaction.response.send_message("❌ Admin only!", ephemeral=True); return
     if rank < 1 or rank > 10:
         await interaction.response.send_message("❌ Rank 1-10!", ephemeral=True); return
     
@@ -345,7 +392,7 @@ async def top10_add(interaction: discord.Interaction, position: str, rank: int,
     else: 
         await interaction.followup.send("❌ Failed!", ephemeral=True)
 
-@bot.tree.command(name="top10_add_badges", description="Add badges to existing Top 10 player (Owner/Admin)")
+@bot.tree.command(name="top10_add_badges", description="Add badges to existing Top 10 player (Admin Only)")
 @maintenance_check()
 @app_commands.describe(position="Position", rank="Rank to update", 
     badge1="First playstyle badge", badge2="Second playstyle badge")
@@ -354,7 +401,7 @@ async def top10_add_badges(interaction: discord.Interaction, position: str, rank
     badge1: discord.Attachment = None, badge2: discord.Attachment = None):
     
     if not can_edit_top10(interaction.user.id):
-        await interaction.response.send_message("❌ No permission!", ephemeral=True); return
+        await interaction.response.send_message("❌ Admin only!", ephemeral=True); return
     
     if not badge1 and not badge2:
         await interaction.response.send_message("❌ You must provide at least one badge!", ephemeral=True); return
@@ -369,37 +416,37 @@ async def top10_add_badges(interaction: discord.Interaction, position: str, rank
     else:
         await interaction.followup.send(f"❌ Failed! Is there a player at {position} #{rank}?", ephemeral=True)
 
-@bot.tree.command(name="top10_remove", description="Remove player (Owner/Admin)")
+@bot.tree.command(name="top10_remove", description="Remove player (Admin Only)")
 @maintenance_check()
 @app_commands.describe(position="Position", rank="Rank to remove")
 @app_commands.choices(position=ALL_POSITIONS)
 async def top10_remove(interaction: discord.Interaction, position: str, rank: int):
     if not can_edit_top10(interaction.user.id):
-        await interaction.response.send_message("❌ No permission!", ephemeral=True); return
+        await interaction.response.send_message("❌ Admin only!", ephemeral=True); return
     if top10_db.remove_top10_entry(position, rank):
         await interaction.response.send_message(f"✅ Removed #{rank} from {position}!", ephemeral=True)
     else: await interaction.response.send_message(f"❌ No player at #{rank}!", ephemeral=True)
 
-@bot.tree.command(name="top10_swap", description="Swap two ranks (Owner/Admin)")
+@bot.tree.command(name="top10_swap", description="Swap two ranks (Admin Only)")
 @maintenance_check()
 @app_commands.describe(position="Position", rank1="First rank", rank2="Second rank")
 @app_commands.choices(position=ALL_POSITIONS)
 async def top10_swap(interaction: discord.Interaction, position: str, rank1: int, rank2: int):
     if not can_edit_top10(interaction.user.id):
-        await interaction.response.send_message("❌ No permission!", ephemeral=True); return
+        await interaction.response.send_message("❌ Admin only!", ephemeral=True); return
     if rank1 == rank2:
         await interaction.response.send_message("❌ Same rank!", ephemeral=True); return
     if top10_db.swap_top10_entries(position, rank1, rank2):
         await interaction.response.send_message(f"✅ Swapped #{rank1} & #{rank2}!", ephemeral=True)
     else: await interaction.response.send_message("❌ Failed!", ephemeral=True)
 
-@bot.tree.command(name="top10_debug", description="Show raw entries (Owner)")
+@bot.tree.command(name="top10_debug", description="Show raw entries (Admin Only)")
 @maintenance_check()
 @app_commands.describe(position="Position")
 @app_commands.choices(position=ALL_POSITIONS)
 async def top10_debug(interaction: discord.Interaction, position: str):
-    if not is_bot_owner(interaction.user.id):
-        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
+    if not is_admin(interaction.user.id):
+        await interaction.response.send_message("❌ Admin only!", ephemeral=True); return
     entries = top10_db.get_top10(position)
     if not entries:
         await interaction.response.send_message(f"❌ No entries in {position}", ephemeral=True); return
@@ -407,22 +454,22 @@ async def top10_debug(interaction: discord.Interaction, position: str):
     for e in entries: text += f"Rank `{e['rank']}`: **{e['player_name']}** ({e['rating']})\n"
     await interaction.response.send_message(text, ephemeral=True)
 
-@bot.tree.command(name="top10_clear", description="Clear all entries for a position (Owner)")
+@bot.tree.command(name="top10_clear", description="Clear all entries for a position (Admin Only)")
 @maintenance_check()
 @app_commands.describe(position="Position")
 @app_commands.choices(position=ALL_POSITIONS)
 async def top10_clear(interaction: discord.Interaction, position: str):
-    if not is_bot_owner(interaction.user.id):
-        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
+    if not is_admin(interaction.user.id):
+        await interaction.response.send_message("❌ Admin only!", ephemeral=True); return
     for rank in range(1, 11): top10_db.remove_top10_entry(position, rank)
     await interaction.response.send_message(f"✅ Cleared {position}!", ephemeral=True)
 
-@bot.tree.command(name="top10_import", description="Import old top10.db into new 4+4+4 databases (Owner Only)")
+@bot.tree.command(name="top10_import", description="Import old top10.db into new 4+4+4 databases (Admin Only)")
 @maintenance_check()
 @app_commands.describe(old_db="Upload your old top10.db file")
 async def top10_import(interaction: discord.Interaction, old_db: discord.Attachment):
-    if not is_bot_owner(interaction.user.id):
-        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
+    if not is_admin(interaction.user.id):
+        await interaction.response.send_message("❌ Admin only!", ephemeral=True); return
     if not old_db.filename.endswith('.db'):
         await interaction.response.send_message("❌ Must be a .db file!", ephemeral=True); return
     
@@ -463,11 +510,11 @@ async def top10_import(interaction: discord.Interaction, old_db: discord.Attachm
 # === UTILITY COMMANDS ===
 # =============================================
 
-@bot.tree.command(name="backup", description="Download all data (Owner)")
+@bot.tree.command(name="backup", description="Download all data (Admin Only)")
 @maintenance_check()
 async def backup_command(interaction: discord.Interaction):
-    if not is_bot_owner(interaction.user.id):
-        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
+    if not is_admin(interaction.user.id):
+        await interaction.response.send_message("❌ Admin only!", ephemeral=True); return
     await interaction.response.defer(ephemeral=True)
     files = []
     for f in ['top10_1.db','top10_2.db','top10_3.db','shards.db','bot_config.json']:
@@ -479,7 +526,7 @@ async def backup_command(interaction: discord.Interaction):
     embed.set_footer(text="FELIX PR | Use /restore to restore")
     await interaction.followup.send(embed=embed, files=files, ephemeral=True)
 
-@bot.tree.command(name="restore", description="Restore from backup (Owner)")
+@bot.tree.command(name="restore", description="Restore from backup (Admin Only)")
 @maintenance_check()
 @app_commands.describe(
     top10_1_file="top10_1.db (opt)", top10_2_file="top10_2.db (opt)",
@@ -489,8 +536,8 @@ async def restore_command(interaction: discord.Interaction,
     top10_1_file: discord.Attachment = None, top10_2_file: discord.Attachment = None,
     top10_3_file: discord.Attachment = None, shards_file: discord.Attachment = None,
     config_file: discord.Attachment = None):
-    if not is_bot_owner(interaction.user.id):
-        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
+    if not is_admin(interaction.user.id):
+        await interaction.response.send_message("❌ Admin only!", ephemeral=True); return
     await interaction.response.defer(ephemeral=True)
     restored, failed = [], []
     for file_obj, name in [(top10_1_file,'top10_1.db'),(top10_2_file,'top10_2.db'),
@@ -513,11 +560,11 @@ async def restore_command(interaction: discord.Interaction,
     if restored: embed.add_field(name="⚠️ Note", value="Restart for full effect", inline=False)
     await interaction.followup.send(embed=embed, ephemeral=True)
 
-@bot.tree.command(name="dbcheck", description="Check database status (Owner)")
+@bot.tree.command(name="dbcheck", description="Check database status (Admin Only)")
 @maintenance_check()
 async def dbcheck_command(interaction: discord.Interaction):
-    if not is_bot_owner(interaction.user.id):
-        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
+    if not is_admin(interaction.user.id):
+        await interaction.response.send_message("❌ Admin only!", ephemeral=True); return
     await interaction.response.defer(ephemeral=True)
     embed = discord.Embed(title="🔍 Database Status", color=0x3498db)
     for db in ['top10_1.db','top10_2.db','top10_3.db','shards.db']:
@@ -544,10 +591,10 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="🏆 `/top10 <pos>`", value="View Top 10 poster", inline=False)
     embed.add_field(name="🔧 Top 10 Mgmt", value="`/top10_add` `/top10_add_badges` `/top10_remove` `/top10_swap`\n`/top10_debug` `/top10_clear` `/top10_import`", inline=False)
     embed.add_field(name="💎 Shard Guide", value="`/shard_add` `/shard_guide` `/shard_remove` `/shard_reset`", inline=False)
-    embed.add_field(name="📢 `/announce_top10`", value="Announce Top 10 update in a channel (Owner)", inline=False)
+    embed.add_field(name="📢 `/announce_top10`", value="Announce Top 10 update in a channel", inline=False)
     embed.add_field(name="💾 `/backup` & `/restore`", value="Backup/restore all data (incl. shards)", inline=False)
     embed.add_field(name="📊 `/stats` & `/dbcheck`", value="Statistics & diagnostics", inline=False)
-    embed.add_field(name="🔧 `/maintenance on/off`", value="Toggle maintenance mode (Owner)", inline=False)
+    embed.add_field(name="🔧 `/maintenance on/off`", value="Toggle maintenance mode (Admin)", inline=False)
     embed.set_footer(text="FELIX PR | 4+4+4 DB Split | Shard Guide Active")
     await interaction.response.send_message(embed=embed)
 
