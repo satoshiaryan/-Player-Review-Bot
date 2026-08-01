@@ -4,7 +4,7 @@ from discord.ext import commands
 import os
 from datetime import datetime
 from dotenv import load_dotenv
-from database import Top10Database
+from database import Top10Database, ShardDatabase
 from poster_generator import Top10Poster
 import threading
 from flask import Flask
@@ -12,6 +12,8 @@ import json
 import asyncio
 import aiohttp
 import sqlite3
+import base64
+import io
 
 # --- Flask Web Server (for Render health checks) ---
 app = Flask(__name__)
@@ -63,6 +65,7 @@ class BotConfig:
 config = BotConfig()
 top10_db = Top10Database()
 poster_gen = Top10Poster()
+shard_db = ShardDatabase()
 
 # --- Maintenance Check Decorator ---
 def maintenance_check():
@@ -92,10 +95,19 @@ bot = FCMReviewBot()
 def is_bot_owner(uid: int) -> bool: return uid == BOT_OWNER_ID
 def can_edit_top10(uid: int) -> bool: return uid == BOT_OWNER_ID or uid in [553418145063239684]
 
+# Value tier emojis and colors
+TIER_EMOJI = {
+    "S": "🌟", "A": "🟢", "B": "🟡", "C": "🟠", "D": "🔴"
+}
+TIER_COLOR = {
+    "S": 0xFFD700, "A": 0x2ecc71, "B": 0xF1C40F, "C": 0xE67E22, "D": 0xE74C3C
+}
+
 @bot.event
 async def on_ready():
     print(f'✅ Logged in as {bot.user}')
     print(f'🏆 Top 10: Active (4+4+4 DB Split)')
+    print(f'💎 Shard Guide: Active')
     print(f'🔧 Maintenance Mode: {"🟢 ON" if maintenance_mode else "🟢 OFF"} (Default: ON)')
     bot.loop.create_task(self_ping())
 
@@ -160,6 +172,116 @@ async def announce_top10(interaction: discord.Interaction, channel: discord.Text
         await interaction.followup.send(f"✅ Announcement sent to {channel.mention}!", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"❌ Failed to send: {e}", ephemeral=True)
+
+# =============================================
+# === SHARD GUIDE COMMANDS ===
+# =============================================
+
+@bot.tree.command(name="shard_add", description="Add player to Shard Value Guide (Owner Only)")
+@maintenance_check()
+@app_commands.describe(
+    player_name="Player name",
+    ovr="Player OVR (e.g., 117)",
+    shard_cost="Shard cost",
+    value_tier="Value rating tier",
+    image="Player card image"
+)
+@app_commands.choices(value_tier=[
+    app_commands.Choice(name="🌟 S Tier - MUST BUY", value="S"),
+    app_commands.Choice(name="🟢 A Tier - Great Value", value="A"),
+    app_commands.Choice(name="🟡 B Tier - Good", value="B"),
+    app_commands.Choice(name="🟠 C Tier - Decent", value="C"),
+    app_commands.Choice(name="🔴 D Tier - Skip", value="D"),
+])
+async def shard_add(interaction: discord.Interaction, player_name: str, ovr: str,
+    shard_cost: int, value_tier: str, image: discord.Attachment):
+    
+    if not is_bot_owner(interaction.user.id):
+        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    if shard_db.add_player(player_name, ovr, shard_cost, value_tier, image.url, interaction.user.name):
+        emoji = TIER_EMOJI.get(value_tier, "")
+        await interaction.followup.send(
+            f"✅ **{player_name}** ({ovr} OVR) added to Shard Guide!\n"
+            f"Cost: `{shard_cost}` shards | Tier: {emoji} `{value_tier}`",
+            ephemeral=True)
+    else:
+        await interaction.followup.send("❌ Failed to add player!", ephemeral=True)
+
+@bot.tree.command(name="shard_guide", description="View the Shard Value Guide")
+@maintenance_check()
+async def shard_guide(interaction: discord.Interaction):
+    await interaction.response.defer()
+    
+    players = shard_db.get_all_players()
+    if not players:
+        await interaction.followup.send(embed=discord.Embed(
+            title="💎 Shard Value Guide",
+            description="No players added yet! Check back when the next batch drops.",
+            color=0x3498db).set_footer(text="FELIX PR"))
+        return
+    
+    # Header embed
+    header = discord.Embed(
+        title="💎 Shard Value Guide",
+        description=f"**{len(players)} players** available this week\n"
+                     "🌟 S = Must Buy | 🟢 A = Great | 🟡 B = Good | 🟠 C = Decent | 🔴 D = Skip\n"
+                     "━━━━━━━━━━━━━━━━━━━━━━━━",
+        color=0x3498db
+    )
+    header.set_footer(text="FELIX PR | Shard Guide • Updated Weekly")
+    await interaction.followup.send(embed=header)
+    
+    # Send each player with image
+    for p in players:
+        color = TIER_COLOR.get(p['value_tier'], 0x3498db)
+        emoji = TIER_EMOJI.get(p['value_tier'], "")
+        
+        embed = discord.Embed(
+            title=f"{emoji} {p['player_name']}",
+            description=f"**OVR:** {p['ovr']}\n**Cost:** `{p['shard_cost']}` shards\n"
+                         f"**Tier:** {emoji} `{p['value_tier']}`",
+            color=color
+        )
+        
+        if p.get('image_data'):
+            try:
+                img_bytes = base64.b64decode(p['image_data'])
+                img_file = discord.File(io.BytesIO(img_bytes), filename=f"shard_{p['id']}.png")
+                embed.set_image(url=f"attachment://shard_{p['id']}.png")
+                await interaction.channel.send(embed=embed, file=img_file)
+            except:
+                await interaction.channel.send(embed=embed)
+        else:
+            await interaction.channel.send(embed=embed)
+
+@bot.tree.command(name="shard_remove", description="Remove player from Shard Guide (Owner Only)")
+@maintenance_check()
+@app_commands.describe(player_id="ID of player to remove")
+async def shard_remove(interaction: discord.Interaction, player_id: int):
+    if not is_bot_owner(interaction.user.id):
+        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
+    
+    if shard_db.remove_player(player_id):
+        await interaction.response.send_message(f"✅ Removed player `{player_id}` from Shard Guide!", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"❌ No player with ID `{player_id}`!", ephemeral=True)
+
+@bot.tree.command(name="shard_reset", description="Reset entire Shard Guide for new week (Owner Only)")
+@maintenance_check()
+async def shard_reset(interaction: discord.Interaction):
+    if not is_bot_owner(interaction.user.id):
+        await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    count = shard_db.remove_all()
+    await interaction.followup.send(
+        f"🔄 **Shard Guide Reset!**\n"
+        f"Removed `{count}` players. Ready for the new batch!",
+        ephemeral=True)
 
 # =============================================
 # === TOP 10 COMMANDS ===
@@ -348,7 +470,7 @@ async def backup_command(interaction: discord.Interaction):
         await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
     await interaction.response.defer(ephemeral=True)
     files = []
-    for f in ['top10_1.db','top10_2.db','top10_3.db','bot_config.json']:
+    for f in ['top10_1.db','top10_2.db','top10_3.db','shards.db','bot_config.json']:
         if os.path.exists(f) and os.path.getsize(f) > 0: files.append(discord.File(f))
     if not files:
         await interaction.followup.send("❌ No files!", ephemeral=True); return
@@ -359,16 +481,20 @@ async def backup_command(interaction: discord.Interaction):
 
 @bot.tree.command(name="restore", description="Restore from backup (Owner)")
 @maintenance_check()
-@app_commands.describe(top10_1_file="top10_1.db (opt)", top10_2_file="top10_2.db (opt)",
-    top10_3_file="top10_3.db (opt)", config_file="bot_config.json (opt)")
+@app_commands.describe(
+    top10_1_file="top10_1.db (opt)", top10_2_file="top10_2.db (opt)",
+    top10_3_file="top10_3.db (opt)", shards_file="shards.db (opt)",
+    config_file="bot_config.json (opt)")
 async def restore_command(interaction: discord.Interaction,
     top10_1_file: discord.Attachment = None, top10_2_file: discord.Attachment = None,
-    top10_3_file: discord.Attachment = None, config_file: discord.Attachment = None):
+    top10_3_file: discord.Attachment = None, shards_file: discord.Attachment = None,
+    config_file: discord.Attachment = None):
     if not is_bot_owner(interaction.user.id):
         await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
     await interaction.response.defer(ephemeral=True)
     restored, failed = [], []
-    for file_obj, name in [(top10_1_file,'top10_1.db'),(top10_2_file,'top10_2.db'),(top10_3_file,'top10_3.db')]:
+    for file_obj, name in [(top10_1_file,'top10_1.db'),(top10_2_file,'top10_2.db'),
+                           (top10_3_file,'top10_3.db'),(shards_file,'shards.db')]:
         if file_obj and file_obj.filename.endswith('.db'):
             try:
                 data = await file_obj.read()
@@ -394,7 +520,7 @@ async def dbcheck_command(interaction: discord.Interaction):
         await interaction.response.send_message("❌ Owner only!", ephemeral=True); return
     await interaction.response.defer(ephemeral=True)
     embed = discord.Embed(title="🔍 Database Status", color=0x3498db)
-    for db in ['top10_1.db','top10_2.db','top10_3.db']:
+    for db in ['top10_1.db','top10_2.db','top10_3.db','shards.db']:
         e = os.path.exists(db); s = os.path.getsize(db) if e else 0
         embed.add_field(name=f"📁 {db}", value=f"Exists: {e}\nSize: {s:,} bytes ({s/1024:.1f} KB)", inline=True)
     embed.add_field(name="📂 Working Dir", value=f"`{os.getcwd()}`", inline=False)
@@ -405,7 +531,8 @@ async def dbcheck_command(interaction: discord.Interaction):
 async def stats_command(interaction: discord.Interaction):
     embed = discord.Embed(title="📊 FELIX PR Stats", color=0x2ecc71, timestamp=datetime.now())
     embed.add_field(name="Latency", value=f"{round(bot.latency*1000)}ms", inline=True)
-    for db in ['top10_1.db','top10_2.db','top10_3.db']:
+    embed.add_field(name="💎 Shard Players", value=str(shard_db.get_count()), inline=True)
+    for db in ['top10_1.db','top10_2.db','top10_3.db','shards.db']:
         s = os.path.getsize(db)/1024 if os.path.exists(db) else 0
         embed.add_field(name=db, value=f"{s:.1f} KB", inline=True)
     await interaction.response.send_message(embed=embed)
@@ -413,14 +540,15 @@ async def stats_command(interaction: discord.Interaction):
 @bot.tree.command(name="help", description="Show all commands")
 @maintenance_check()
 async def help_command(interaction: discord.Interaction):
-    embed = discord.Embed(title="📚 FELIX PR - Help", color=0x8B5CF6, description="FC Mobile Top 10 Bot")
+    embed = discord.Embed(title="📚 FELIX PR - Help", color=0x8B5CF6, description="FC Mobile Top 10 & Shard Guide Bot")
     embed.add_field(name="🏆 `/top10 <pos>`", value="View Top 10 poster", inline=False)
     embed.add_field(name="🔧 Top 10 Mgmt", value="`/top10_add` `/top10_add_badges` `/top10_remove` `/top10_swap`\n`/top10_debug` `/top10_clear` `/top10_import`", inline=False)
+    embed.add_field(name="💎 Shard Guide", value="`/shard_add` `/shard_guide` `/shard_remove` `/shard_reset`", inline=False)
     embed.add_field(name="📢 `/announce_top10`", value="Announce Top 10 update in a channel (Owner)", inline=False)
-    embed.add_field(name="💾 `/backup` & `/restore`", value="Backup/restore all data", inline=False)
+    embed.add_field(name="💾 `/backup` & `/restore`", value="Backup/restore all data (incl. shards)", inline=False)
     embed.add_field(name="📊 `/stats` & `/dbcheck`", value="Statistics & diagnostics", inline=False)
     embed.add_field(name="🔧 `/maintenance on/off`", value="Toggle maintenance mode (Owner)", inline=False)
-    embed.set_footer(text="FELIX PR | 4+4+4 DB Split | Maintenance ON by default")
+    embed.set_footer(text="FELIX PR | 4+4+4 DB Split | Shard Guide Active")
     await interaction.response.send_message(embed=embed)
 
 if __name__ == "__main__":
