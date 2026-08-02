@@ -50,7 +50,6 @@ BOT_OWNER_ID = 1214456066687893506
 CO_OWNER_ID = 553418145063239684
 CONFIG_FILE = "bot_config.json"
 
-# === MAINTENANCE MODE (OFF BY DEFAULT NOW) ===
 maintenance_mode = False
 
 class BotConfig:
@@ -68,7 +67,6 @@ top10_db = Top10Database()
 poster_gen = Top10Poster()
 shard_db = ShardDatabase()
 
-# --- Maintenance Check Decorator ---
 def maintenance_check():
     async def predicate(interaction: discord.Interaction) -> bool:
         if maintenance_mode and not is_bot_owner(interaction.user.id) and not is_co_owner(interaction.user.id):
@@ -83,9 +81,10 @@ def maintenance_check():
     return app_commands.check(predicate)
 
 class ShardGuideView(discord.ui.View):
-    def __init__(self, players: list, page: int = 0):
+    def __init__(self, players: list, week: int, page: int = 0):
         super().__init__(timeout=120)
         self.players = players
+        self.week = week
         self.page = page
         self.total_pages = len(players)
         self.update_buttons()
@@ -133,7 +132,8 @@ class ShardGuideView(discord.ui.View):
         embed = discord.Embed(
             title=f"{emoji} {p['player_name']}",
             description=f"**OVR:** {p['ovr']}\n**Cost:** `{p['shard_cost']}` shards\n"
-                         f"**Tier:** {emoji} `{p['value_tier']}`\n\n"
+                         f"**Tier:** {emoji} `{p['value_tier']}`\n"
+                         f"**Week:** {self.week}\n\n"
                          f"Player {self.page + 1} of {self.total_pages}",
             color=color
         )
@@ -167,19 +167,14 @@ def is_co_owner(uid: int) -> bool: return uid == CO_OWNER_ID
 def is_admin(uid: int) -> bool: return is_bot_owner(uid) or is_co_owner(uid)
 def can_edit_top10(uid: int) -> bool: return is_admin(uid)
 
-# Value tier emojis and colors
-TIER_EMOJI = {
-    "S": "🌟", "A": "🟢", "B": "🟡", "C": "🟠", "D": "🔴"
-}
-TIER_COLOR = {
-    "S": 0xFFD700, "A": 0x2ecc71, "B": 0xF1C40F, "C": 0xE67E22, "D": 0xE74C3C
-}
+TIER_EMOJI = {"S": "🌟", "A": "🟢", "B": "🟡", "C": "🟠", "D": "🔴"}
+TIER_COLOR = {"S": 0xFFD700, "A": 0x2ecc71, "B": 0xF1C40F, "C": 0xE67E22, "D": 0xE74C3C}
 
 @bot.event
 async def on_ready():
     print(f'✅ Logged in as {bot.user}')
     print(f'🏆 Top 10: Active (4+4+4 DB Split)')
-    print(f'💎 Shard Guide: Active')
+    print(f'💎 Shard Guide: Active (Week System)')
     print(f'🔧 Maintenance Mode: {"🟢 ON" if maintenance_mode else "🟢 OFF"}')
     print(f'👑 Admins: {BOT_OWNER_ID}, {CO_OWNER_ID}')
     bot.loop.create_task(self_ping())
@@ -257,6 +252,7 @@ async def announce_top10(interaction: discord.Interaction, channel: discord.Text
     ovr="Player OVR (e.g., 117)",
     shard_cost="Shard cost",
     value_tier="Value rating tier",
+    week="Week number (e.g., 1, 2, 3...)",
     image="Player card image"
 )
 @app_commands.choices(value_tier=[
@@ -267,42 +263,61 @@ async def announce_top10(interaction: discord.Interaction, channel: discord.Text
     app_commands.Choice(name="🔴 D Tier - Skip", value="D"),
 ])
 async def shard_add(interaction: discord.Interaction, player_name: str, ovr: str,
-    shard_cost: int, value_tier: str, image: discord.Attachment):
+    shard_cost: int, value_tier: str, week: int, image: discord.Attachment):
     
     if not is_admin(interaction.user.id):
         await interaction.response.send_message("❌ Admin only!", ephemeral=True); return
     
     await interaction.response.defer(ephemeral=True)
     
-    if shard_db.add_player(player_name, ovr, shard_cost, value_tier, image.url, interaction.user.name):
+    if shard_db.add_player(player_name, ovr, shard_cost, value_tier, week, image.url, interaction.user.name):
         emoji = TIER_EMOJI.get(value_tier, "")
         await interaction.followup.send(
-            f"✅ **{player_name}** ({ovr} OVR) added to Shard Guide!\n"
+            f"✅ **{player_name}** ({ovr} OVR) added to Shard Guide Week {week}!\n"
             f"Cost: `{shard_cost}` shards | Tier: {emoji} `{value_tier}`",
             ephemeral=True)
     else:
         await interaction.followup.send("❌ Failed to add player!", ephemeral=True)
 
-@bot.tree.command(name="shard_guide", description="View the Shard Value Guide with pagination")
+@bot.tree.command(name="shard_guide", description="View the Shard Value Guide for a specific week")
 @maintenance_check()
-async def shard_guide(interaction: discord.Interaction):
+@app_commands.describe(week="Week number to view")
+async def shard_guide(interaction: discord.Interaction, week: int):
     await interaction.response.defer()
     
-    players = shard_db.get_all_players()
+    players = shard_db.get_players_by_week(week)
     if not players:
+        weeks = shard_db.get_all_weeks()
+        week_list = ", ".join([f"`{w}`" for w in weeks]) if weeks else "None"
         await interaction.followup.send(embed=discord.Embed(
-            title="💎 Shard Value Guide",
-            description="No players added yet! Check back when the next batch drops.",
+            title=f"💎 Shard Value Guide - Week {week}",
+            description=f"No players for Week {week}.\n\nAvailable weeks: {week_list}",
             color=0x3498db).set_footer(text="FELIX PR"))
         return
     
-    view = ShardGuideView(players)
+    view = ShardGuideView(players, week)
     embed, file = view.get_player_embed()
     
     if file:
         await interaction.followup.send(embed=embed, file=file, view=view)
     else:
         await interaction.followup.send(embed=embed, view=view)
+
+@bot.tree.command(name="shard_weeks", description="List all available Shard Guide weeks")
+@maintenance_check()
+async def shard_weeks(interaction: discord.Interaction):
+    weeks = shard_db.get_all_weeks()
+    if not weeks:
+        await interaction.response.send_message("No shard guide weeks found!", ephemeral=True)
+        return
+    
+    text = "**📅 Available Shard Guide Weeks:**\n"
+    for w in weeks:
+        count = shard_db.get_count(w)
+        text += f"• Week `{w}` - {count} players\n"
+    text += "\nUse `/shard_guide week:<number>` to view!"
+    
+    await interaction.response.send_message(text, ephemeral=True)
 
 @bot.tree.command(name="shard_remove", description="Remove player from Shard Guide (Admin Only)")
 @maintenance_check()
@@ -316,18 +331,19 @@ async def shard_remove(interaction: discord.Interaction, player_id: int):
     else:
         await interaction.response.send_message(f"❌ No player with ID `{player_id}`!", ephemeral=True)
 
-@bot.tree.command(name="shard_reset", description="Reset entire Shard Guide for new week (Admin Only)")
+@bot.tree.command(name="shard_reset_week", description="Delete all players from a specific week (Admin Only)")
 @maintenance_check()
-async def shard_reset(interaction: discord.Interaction):
+@app_commands.describe(week="Week number to reset")
+async def shard_reset_week(interaction: discord.Interaction, week: int):
     if not is_admin(interaction.user.id):
         await interaction.response.send_message("❌ Admin only!", ephemeral=True); return
     
     await interaction.response.defer(ephemeral=True)
     
-    count = shard_db.remove_all()
+    count = shard_db.remove_week(week)
     await interaction.followup.send(
-        f"🔄 **Shard Guide Reset!**\n"
-        f"Removed `{count}` players. Ready for the new batch!",
+        f"🔄 **Week {week} Reset!**\n"
+        f"Removed `{count}` players from Week {week}.",
         ephemeral=True)
 
 # =============================================
@@ -578,7 +594,7 @@ async def dbcheck_command(interaction: discord.Interaction):
 async def stats_command(interaction: discord.Interaction):
     embed = discord.Embed(title="📊 FELIX PR Stats", color=0x2ecc71, timestamp=datetime.now())
     embed.add_field(name="Latency", value=f"{round(bot.latency*1000)}ms", inline=True)
-    embed.add_field(name="💎 Shard Players", value=str(shard_db.get_count()), inline=True)
+    embed.add_field(name="💎 Total Shard Players", value=str(shard_db.get_count()), inline=True)
     for db in ['top10_1.db','top10_2.db','top10_3.db','shards.db']:
         s = os.path.getsize(db)/1024 if os.path.exists(db) else 0
         embed.add_field(name=db, value=f"{s:.1f} KB", inline=True)
@@ -590,12 +606,12 @@ async def help_command(interaction: discord.Interaction):
     embed = discord.Embed(title="📚 FELIX PR - Help", color=0x8B5CF6, description="FC Mobile Top 10 & Shard Guide Bot")
     embed.add_field(name="🏆 `/top10 <pos>`", value="View Top 10 poster", inline=False)
     embed.add_field(name="🔧 Top 10 Mgmt", value="`/top10_add` `/top10_add_badges` `/top10_remove` `/top10_swap`\n`/top10_debug` `/top10_clear` `/top10_import`", inline=False)
-    embed.add_field(name="💎 Shard Guide", value="`/shard_add` `/shard_guide` `/shard_remove` `/shard_reset`", inline=False)
+    embed.add_field(name="💎 Shard Guide", value="`/shard_add` `/shard_guide week:` `/shard_weeks`\n`/shard_remove` `/shard_reset_week`", inline=False)
     embed.add_field(name="📢 `/announce_top10`", value="Announce Top 10 update in a channel", inline=False)
     embed.add_field(name="💾 `/backup` & `/restore`", value="Backup/restore all data (incl. shards)", inline=False)
     embed.add_field(name="📊 `/stats` & `/dbcheck`", value="Statistics & diagnostics", inline=False)
     embed.add_field(name="🔧 `/maintenance on/off`", value="Toggle maintenance mode (Admin)", inline=False)
-    embed.set_footer(text="FELIX PR | 4+4+4 DB Split | Shard Guide Active")
+    embed.set_footer(text="FELIX PR | 4+4+4 DB Split | Shard Guide Week System")
     await interaction.response.send_message(embed=embed)
 
 if __name__ == "__main__":
