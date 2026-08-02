@@ -81,10 +81,11 @@ def maintenance_check():
     return app_commands.check(predicate)
 
 class ShardGuideView(discord.ui.View):
-    def __init__(self, players: list, week: int, page: int = 0):
+    def __init__(self, players: list, week: int, max_shards: int = None, page: int = 0):
         super().__init__(timeout=120)
         self.players = players
         self.week = week
+        self.max_shards = max_shards
         self.page = page
         self.total_pages = len(players)
         self.update_buttons()
@@ -129,9 +130,13 @@ class ShardGuideView(discord.ui.View):
         color = TIER_COLOR.get(p['value_tier'], 0x3498db)
         emoji = TIER_EMOJI.get(p['value_tier'], "")
         
+        cost_info = f"**Cost:** `{p['shard_cost']}` shards"
+        if self.max_shards:
+            cost_info += f" (within your {self.max_shards} limit ✅)"
+        
         embed = discord.Embed(
             title=f"{emoji} {p['player_name']}",
-            description=f"**OVR:** {p['ovr']}\n**Cost:** `{p['shard_cost']}` shards\n"
+            description=f"**OVR:** {p['ovr']}\n{cost_info}\n"
                          f"**Tier:** {emoji} `{p['value_tier']}`\n"
                          f"**Week:** {self.week}\n\n"
                          f"Player {self.page + 1} of {self.total_pages}",
@@ -174,7 +179,7 @@ TIER_COLOR = {"S": 0xFFD700, "A": 0x2ecc71, "B": 0xF1C40F, "C": 0xE67E22, "D": 0
 async def on_ready():
     print(f'✅ Logged in as {bot.user}')
     print(f'🏆 Top 10: Active (4+4+4 DB Split)')
-    print(f'💎 Shard Guide: Active (Week System)')
+    print(f'💎 Shard Guide: Active (Week System + Filter)')
     print(f'🔧 Maintenance Mode: {"🟢 ON" if maintenance_mode else "🟢 OFF"}')
     print(f'👑 Admins: {BOT_OWNER_ID}, {CO_OWNER_ID}')
     bot.loop.create_task(self_ping())
@@ -279,10 +284,13 @@ async def shard_add(interaction: discord.Interaction, player_name: str, ovr: str
     else:
         await interaction.followup.send("❌ Failed to add player!", ephemeral=True)
 
-@bot.tree.command(name="shard_guide", description="View the Shard Value Guide for a specific week")
+@bot.tree.command(name="shard_guide", description="View Shard Guide with optional shard filter")
 @maintenance_check()
-@app_commands.describe(week="Week number to view")
-async def shard_guide(interaction: discord.Interaction, week: int):
+@app_commands.describe(
+    week="Week number to view",
+    max_shards="Optional: Show only players within this shard cost"
+)
+async def shard_guide(interaction: discord.Interaction, week: int, max_shards: int = None):
     await interaction.response.defer()
     
     players = shard_db.get_players_by_week(week)
@@ -295,13 +303,49 @@ async def shard_guide(interaction: discord.Interaction, week: int):
             color=0x3498db).set_footer(text="FELIX PR"))
         return
     
-    view = ShardGuideView(players, week)
+    total_in_week = len(players)
+    
+    # Apply shard filter if provided
+    if max_shards is not None:
+        filtered = [p for p in players if p['shard_cost'] <= max_shards]
+        if not filtered:
+            min_cost = min(p['shard_cost'] for p in players)
+            await interaction.followup.send(embed=discord.Embed(
+                title=f"💎 Shard Value Guide - Week {week}",
+                description=f"❌ No players available within `{max_shards}` shards.\n\n"
+                             f"The cheapest player this week costs `{min_cost}` shards.\n"
+                             f"Try a higher limit or check another week!",
+                color=0xE74C3C).set_footer(text="FELIX PR | Try /shard_guide week:{week} for all"))
+            return
+        players = filtered
+    
+    # Title
+    title = f"💎 Shard Value Guide - Week {week}"
+    if max_shards is not None:
+        title += f" (≤{max_shards} shards)"
+    
+    # Header
+    header_desc = f"**{len(players)}/{total_in_week} players** shown\n"
+    if max_shards:
+        header_desc += f"Filter: `{max_shards}` shards or less\n"
+    header_desc += "🌟 S = Must Buy | 🟢 A = Great | 🟡 B = Good | 🟠 C = Decent | 🔴 D = Skip\n"
+    header_desc += "━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    header = discord.Embed(
+        title=title,
+        description=header_desc,
+        color=0x3498db
+    )
+    header.set_footer(text="FELIX PR | Shard Guide • Use buttons to navigate")
+    await interaction.followup.send(embed=header)
+    
+    view = ShardGuideView(players, week, max_shards)
     embed, file = view.get_player_embed()
     
     if file:
-        await interaction.followup.send(embed=embed, file=file, view=view)
+        await interaction.channel.send(embed=embed, file=file, view=view)
     else:
-        await interaction.followup.send(embed=embed, view=view)
+        await interaction.channel.send(embed=embed, view=view)
 
 @bot.tree.command(name="shard_weeks", description="List all available Shard Guide weeks")
 @maintenance_check()
@@ -314,8 +358,10 @@ async def shard_weeks(interaction: discord.Interaction):
     text = "**📅 Available Shard Guide Weeks:**\n"
     for w in weeks:
         count = shard_db.get_count(w)
-        text += f"• Week `{w}` - {count} players\n"
-    text += "\nUse `/shard_guide week:<number>` to view!"
+        min_cost = min(p['shard_cost'] for p in shard_db.get_players_by_week(w)) if count > 0 else 0
+        text += f"• Week `{w}` - {count} players (from `{min_cost}` shards)\n"
+    text += "\nUse `/shard_guide week:<number>` to view!\n"
+    text += "Use `/shard_guide week:<number> max_shards:<limit>` to filter!"
     
     await interaction.response.send_message(text, ephemeral=True)
 
@@ -606,12 +652,12 @@ async def help_command(interaction: discord.Interaction):
     embed = discord.Embed(title="📚 FELIX PR - Help", color=0x8B5CF6, description="FC Mobile Top 10 & Shard Guide Bot")
     embed.add_field(name="🏆 `/top10 <pos>`", value="View Top 10 poster", inline=False)
     embed.add_field(name="🔧 Top 10 Mgmt", value="`/top10_add` `/top10_add_badges` `/top10_remove` `/top10_swap`\n`/top10_debug` `/top10_clear` `/top10_import`", inline=False)
-    embed.add_field(name="💎 Shard Guide", value="`/shard_add` `/shard_guide week:` `/shard_weeks`\n`/shard_remove` `/shard_reset_week`", inline=False)
+    embed.add_field(name="💎 Shard Guide", value="`/shard_add` `/shard_guide week: max_shards:`\n`/shard_weeks` `/shard_remove` `/shard_reset_week`", inline=False)
     embed.add_field(name="📢 `/announce_top10`", value="Announce Top 10 update in a channel", inline=False)
     embed.add_field(name="💾 `/backup` & `/restore`", value="Backup/restore all data (incl. shards)", inline=False)
     embed.add_field(name="📊 `/stats` & `/dbcheck`", value="Statistics & diagnostics", inline=False)
     embed.add_field(name="🔧 `/maintenance on/off`", value="Toggle maintenance mode (Admin)", inline=False)
-    embed.set_footer(text="FELIX PR | 4+4+4 DB Split | Shard Guide Week System")
+    embed.set_footer(text="FELIX PR | 4+4+4 DB Split | Shard Guide + Filter")
     await interaction.response.send_message(embed=embed)
 
 if __name__ == "__main__":
