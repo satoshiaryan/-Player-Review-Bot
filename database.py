@@ -138,6 +138,7 @@ class ShardDatabase:
                     ovr TEXT,
                     shard_cost INTEGER DEFAULT 0,
                     value_tier TEXT DEFAULT "B",
+                    week INTEGER DEFAULT 1,
                     image_url TEXT,
                     image_data TEXT DEFAULT NULL,
                     added_by TEXT,
@@ -150,6 +151,8 @@ class ShardDatabase:
             columns = [col[1] for col in cursor.fetchall()]
             if 'image_data' not in columns:
                 cursor.execute('ALTER TABLE shard_players ADD COLUMN image_data TEXT DEFAULT NULL')
+            if 'week' not in columns:
+                cursor.execute('ALTER TABLE shard_players ADD COLUMN week INTEGER DEFAULT 1')
             conn.commit()
     
     def _download_to_base64(self, url: str) -> Optional[str]:
@@ -161,23 +164,29 @@ class ShardDatabase:
         except: return None
     
     def add_player(self, player_name: str, ovr: str, shard_cost: int, value_tier: str,
-                   image_url: str, added_by: str) -> bool:
+                   week: int, image_url: str, added_by: str) -> bool:
         img_b64 = self._download_to_base64(image_url)
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                INSERT INTO shard_players (player_name, ovr, shard_cost, value_tier, image_url, image_data, added_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (player_name, ovr, shard_cost, value_tier, image_url, img_b64, added_by))
+                INSERT INTO shard_players (player_name, ovr, shard_cost, value_tier, week, image_url, image_data, added_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (player_name, ovr, shard_cost, value_tier, week, image_url, img_b64, added_by))
             conn.commit()
             return True
     
-    def get_all_players(self) -> list:
+    def get_players_by_week(self, week: int) -> list:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM shard_players ORDER BY value_tier ASC, shard_cost ASC")
+            cursor.execute("SELECT * FROM shard_players WHERE week = ? ORDER BY value_tier ASC, shard_cost ASC", (week,))
             return [dict(row) for row in cursor.fetchall()]
+    
+    def get_all_weeks(self) -> list:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT DISTINCT week FROM shard_players ORDER BY week DESC")
+            return [row[0] for row in cursor.fetchall()]
     
     def get_player(self, player_id: int):
         with sqlite3.connect(self.db_path) as conn:
@@ -194,17 +203,20 @@ class ShardDatabase:
             conn.commit()
             return cursor.rowcount > 0
     
-    def remove_all(self) -> int:
+    def remove_week(self, week: int) -> int:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM shard_players")
+            cursor.execute("SELECT COUNT(*) FROM shard_players WHERE week = ?", (week,))
             count = cursor.fetchone()[0]
-            cursor.execute("DELETE FROM shard_players")
+            cursor.execute("DELETE FROM shard_players WHERE week = ?", (week,))
             conn.commit()
             return count
     
-    def get_count(self) -> int:
+    def get_count(self, week: int = None) -> int:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM shard_players")
+            if week:
+                cursor.execute("SELECT COUNT(*) FROM shard_players WHERE week = ?", (week,))
+            else:
+                cursor.execute("SELECT COUNT(*) FROM shard_players")
             return cursor.fetchone()[0]
