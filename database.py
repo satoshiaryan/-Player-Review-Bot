@@ -179,7 +179,17 @@ class ShardDatabase:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM shard_players WHERE week = ? ORDER BY value_tier ASC, shard_cost ASC", (week,))
+            cursor.execute("""
+                SELECT * FROM shard_players 
+                WHERE week = ? 
+                ORDER BY CASE value_tier 
+                    WHEN 'S' THEN 1 
+                    WHEN 'A' THEN 2 
+                    WHEN 'B' THEN 3 
+                    WHEN 'C' THEN 4 
+                    WHEN 'D' THEN 5 
+                END, shard_cost ASC
+            """, (week,))
             return [dict(row) for row in cursor.fetchall()]
     
     def get_all_weeks(self) -> list:
