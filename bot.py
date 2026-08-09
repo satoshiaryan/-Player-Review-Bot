@@ -138,7 +138,7 @@ class ShardGuideView(discord.ui.View):
                          f"Player {self.page + 1} of {self.total_pages}",
             color=color
         )
-        embed.set_footer(text="FELIX PR | Shard Guide • Use buttons to navigate")
+        embed.set_footer(text=f"FELIX PR | Player ID: {p['id']} • Use /shard_remove player_id:{p['id']} to remove")
         
         file = None
         if p.get('image_data'):
@@ -336,7 +336,6 @@ async def shard_guide(interaction: discord.Interaction, week: int,
     
     # Filter by max shards
     if max_shards is not None:
-        before_count = len(players)
         players = [p for p in players if p['shard_cost'] <= max_shards]
         active_filters.append(f"≤{max_shards} shards")
         if not players:
@@ -361,7 +360,7 @@ async def shard_guide(interaction: discord.Interaction, week: int,
     header_desc += "━━━━━━━━━━━━━━━━━━━━━━━━"
     
     header = discord.Embed(title=title, description=header_desc, color=0x3498db)
-    header.set_footer(text="FELIX PR | Shard Guide • Use buttons to navigate")
+    header.set_footer(text="FELIX PR | Shard Guide • Player IDs shown on each card")
     await interaction.followup.send(embed=header)
     
     filters_text = ", ".join(active_filters) if active_filters else ""
@@ -393,7 +392,7 @@ async def shard_weeks(interaction: discord.Interaction):
 
 @bot.tree.command(name="shard_remove", description="Remove player from Shard Guide (Admin Only)")
 @maintenance_check()
-@app_commands.describe(player_id="ID of player to remove")
+@app_commands.describe(player_id="ID of player to remove (shown on each card)")
 async def shard_remove(interaction: discord.Interaction, player_id: int):
     if not is_admin(interaction.user.id):
         await interaction.response.send_message("❌ Admin only!", ephemeral=True); return
@@ -678,7 +677,7 @@ async def help_command(interaction: discord.Interaction):
     embed = discord.Embed(title="📚 FELIX PR - Help", color=0x8B5CF6, description="FC Mobile Top 10 & Shard Guide Bot")
     embed.add_field(name="🏆 `/top10 <pos>`", value="View Top 10 poster", inline=False)
     embed.add_field(name="🔧 Top 10 Mgmt", value="`/top10_add` `/top10_add_badges` `/top10_remove` `/top10_swap`\n`/top10_debug` `/top10_clear` `/top10_import`", inline=False)
-    embed.add_field(name="💎 Shard Guide", value="`/shard_add` `/shard_guide week: max_shards: value_tier: player_name:`\n`/shard_weeks` `/shard_remove` `/shard_reset_week`", inline=False)
+    embed.add_field(name="💎 Shard Guide", value="`/shard_add` `/shard_guide week: max_shards: value_tier: player_name:`\n`/shard_weeks` `/shard_remove player_id:` `/shard_reset_week`", inline=False)
     embed.add_field(name="📢 `/announce_top10`", value="Announce Top 10 update in a channel", inline=False)
     embed.add_field(name="💾 `/backup` & `/restore`", value="Backup/restore all data (incl. shards)", inline=False)
     embed.add_field(name="📊 `/stats` & `/dbcheck`", value="Statistics & diagnostics", inline=False)
