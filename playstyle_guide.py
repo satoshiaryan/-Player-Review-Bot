@@ -10,7 +10,7 @@ PLAYSTYLE_GUIDE = {
         "categories": {
             "Attack": {
                 "emoji": "⚡",
-                "playstyles": ["Rapid", "Trickstar", "Finesse Expert"]
+                "playstyles": ["Rapid", "Trickster", "Finesse Expert"]
             },
             "Midfield": {
                 "emoji": "🎯",
@@ -48,7 +48,7 @@ PLAYSTYLE_GUIDE = {
         "categories": {
             "Attack": {
                 "emoji": "⚡",
-                "playstyles": ["Rapid", "Trickstar", "Finesse Expert"]
+                "playstyles": ["Rapid", "Trickster", "Finesse Expert"]
             },
             "Midfield": {
                 "emoji": "🎯",
