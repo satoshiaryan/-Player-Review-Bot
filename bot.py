@@ -393,43 +393,6 @@ async def playstyle_guide_cmd(interaction: discord.Interaction, mode: str):
     await interaction.response.send_message(embed=embed)
 
 # =============================================
-# === ANNOUNCE TOP 10 COMMAND ===
-# =============================================
-
-@bot.tree.command(name="announce_top10", description="Announce Top 10 update in a channel (Admin Only)")
-@app_commands.describe(channel="Channel to send the announcement to")
-async def announce_top10(interaction: discord.Interaction, channel: discord.TextChannel):
-    if not is_admin(interaction.user.id):
-        await interaction.response.send_message("❌ Admin only!", ephemeral=True); return
-    
-    await interaction.response.defer(ephemeral=True)
-    
-    embed = discord.Embed(
-        title="🏆 **Top 10 List Updated!**",
-        description=(
-            "Hey <@&1391671055902572625>! The **Top 10 Players** list has been refreshed! 📊\n\n"
-            "## 📋 **Updated Positions:**\n"
-            "✅ All 12 positions have been updated:\n"
-            "`GK` `LB` `RB` `CB` `CM` `CDM` `CAM` `LM` `RM` `LW` `RW` `ST`\n\n"
-            "## 🔍 **Check it out:**\n"
-            "```\n/top10 [position]\n```\n"
-            "New Update on Top 10 lists: All P2W cards removed i.e, no more box cards in any lists.\n\n"
-            "## 📅 **Next Update:**\n"
-            "Next Saturday or Sunday or Monday, before 10 PM IST\n\n"
-            "Thanks to the <@&1484603567057666219> for their work on the lists! 👏\n\n"
-            "Stay updated on the meta! ⚽"
-        ),
-        color=0xF5A623
-    )
-    embed.set_footer(text="FELIX PR | Top 10 Announcement")
-    
-    try:
-        await channel.send(embed=embed)
-        await interaction.followup.send(f"✅ Announcement sent to {channel.mention}!", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"❌ Failed to send: {e}", ephemeral=True)
-
-# =============================================
 # === SHARD GUIDE COMMANDS ===
 # =============================================
 
@@ -864,7 +827,6 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="💎 Shard Guide", value="`/shard_add` `/shard_guide week: max_shards: value_tier: player_name:`\n`/shard_weeks` `/shard_remove player_id:` `/shard_reset_week`", inline=False)
     embed.add_field(name="🎯 Skill Guide", value="`/skill_guide position:`\n*Select your position, then click a playstyle button!*", inline=False)
     embed.add_field(name="⚔️ Playstyle Guide", value="`/playstyle_guide mode:`\n*See best playstyles for H2H, MM, or VSA!*", inline=False)
-    embed.add_field(name="📢 `/announce_top10`", value="Announce Top 10 update in a channel", inline=False)
     embed.add_field(name="💾 `/backup` & `/restore`", value="Backup/restore all data (incl. shards)", inline=False)
     embed.add_field(name="📊 `/stats` & `/dbcheck`", value="Statistics & diagnostics", inline=False)
     embed.add_field(name="🔧 `/maintenance on/off`", value="Toggle maintenance mode (Admin)", inline=False)
