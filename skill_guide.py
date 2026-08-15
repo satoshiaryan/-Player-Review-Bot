@@ -150,16 +150,6 @@ def get_skill_guide(position: str, playstyle: str = None) -> dict:
     """
     position = position.upper()
     
-    position_map = {
-        "LW": "Winger", "RW": "Winger",
-        "ST": "Striker",
-        "LM": "Wide_Midfielder", "RM": "Wide_Midfielder",
-        "CAM": "CAM", "CDM": "CDM", "CM": "CM",
-        "CB": "CB", "LB": "FB", "RB": "FB", "GK": "GK"
-    }
-    
-    group = position_map.get(position, position)
-    
     matching_guides = []
     for key, guide in SKILL_GUIDE.items():
         if position in guide.get("positions", []):
@@ -171,17 +161,32 @@ def get_skill_guide(position: str, playstyle: str = None) -> dict:
     # If multiple matches and playstyle provided, try to narrow down
     if playstyle and len(matching_guides) > 1:
         playstyle_lower = playstyle.lower()
+        
+        # First, try exact match with skill_name
+        for key, guide in matching_guides:
+            if playstyle_lower == guide["skill_name"].lower():
+                return guide
+        
+        # Then try partial match
         for key, guide in matching_guides:
             if playstyle_lower in guide["skill_name"].lower():
                 return guide
-            if "Any" in key and "Irrespective" in guide.get("note", ""):
+            
+            # Check if playstyle contains key parts of skill_name
+            skill_words = guide["skill_name"].lower().split()
+            if any(word in playstyle_lower for word in skill_words if len(word) > 3):
                 return guide
     
-    # Return first match (or "Any" type if available)
+    # If only one match, return it
+    if len(matching_guides) == 1:
+        return matching_guides[0][1]
+    
+    # Return "Any" type if available
     for key, guide in matching_guides:
         if "Any" in key:
             return guide
     
+    # Otherwise return first match
     return matching_guides[0][1]
 
 
@@ -195,7 +200,8 @@ def get_position_options(position: str) -> list:
             options.append({
                 "key": key,
                 "skill_name": guide["skill_name"],
-                "note": guide["note"]
+                "note": guide["note"],
+                "recommendations": guide["recommendations"]
             })
     
     return options
