@@ -183,34 +183,70 @@ async def on_ready():
     bot.loop.create_task(self_ping())
 
 # =============================================
-# === PLAYSTYLE AUTOCOMPLETE ===
+# === PLAYSTYLE BUTTON VIEW ===
 # =============================================
 
-async def playstyle_autocomplete(
-    interaction: discord.Interaction,
-    current: str,
-) -> list[app_commands.Choice[str]]:
-    """
-    Autocomplete for playstyle based on selected position
-    """
-    # Get the position value from the interaction namespace
-    position = interaction.namespace.get('position', '')
+class PlaystyleView(discord.ui.View):
+    def __init__(self, position: str):
+        super().__init__(timeout=60)
+        self.position = position
+        self.add_playstyle_buttons()
     
-    if not position:
-        return []
+    def add_playstyle_buttons(self):
+        options = get_position_options(self.position)
+        
+        # Different button styles for variety
+        styles = [
+            discord.ButtonStyle.primary,
+            discord.ButtonStyle.success,
+            discord.ButtonStyle.danger,
+            discord.ButtonStyle.secondary
+        ]
+        
+        for i, opt in enumerate(options):
+            # Create a button for each playstyle option
+            button = discord.ui.Button(
+                label=opt['skill_name'][:80],  # Discord button label limit is 80 chars
+                style=styles[i % len(styles)],
+                custom_id=f"playstyle_{i}",
+                row=i // 2  # 2 buttons per row (max 5 buttons per row)
+            )
+            button.callback = self.create_callback(opt)
+            self.add_item(button)
     
-    # Get all playstyle options for this position
-    options = get_position_options(position)
+    def create_callback(self, opt):
+        async def button_callback(interaction: discord.Interaction):
+            guide = get_skill_guide(self.position, opt['skill_name'])
+            
+            embed = discord.Embed(
+                title=f"🎯 Skill Point Guide - {self.position}",
+                description=f"**Your Playstyle:** {guide['skill_name']}",
+                color=0x8B5CF6
+            )
+            
+            for i, skill in enumerate(guide["recommendations"], 1):
+                embed.add_field(
+                    name=f"{i}. {skill}",
+                    value="✅ Recommended",
+                    inline=False
+                )
+            
+            embed.add_field(
+                name="📝 Note",
+                value=guide.get("note", "Recommended skill point combination"),
+                inline=False
+            )
+            
+            embed.set_footer(text="FELIX PR | Skill Point Guide")
+            
+            await interaction.response.edit_message(embed=embed, view=None)
+        
+        return button_callback
     
-    # Filter based on what user has typed so far
-    filtered_options = [
-        app_commands.Choice(name=opt['skill_name'], value=opt['skill_name'])
-        for opt in options
-        if current.lower() in opt['skill_name'].lower()
-    ]
-    
-    # Discord allows max 25 choices
-    return filtered_options[:25]
+    async def on_timeout(self):
+        # Clear buttons when view times out
+        for item in self.children:
+            item.disabled = True
 
 # =============================================
 # === MAINTENANCE COMMAND ===
@@ -243,11 +279,7 @@ async def maintenance_cmd(interaction: discord.Interaction, status: str):
 
 @bot.tree.command(name="skill_guide", description="Get skill point recommendations for your player")
 @maintenance_check()
-@app_commands.describe(
-    position="Position of your player",
-    playstyle="Your player's current skill point or workrate"
-)
-@app_commands.autocomplete(playstyle=playstyle_autocomplete)
+@app_commands.describe(position="Position of your player")
 @app_commands.choices(position=[
     app_commands.Choice(name="LW - Left Winger", value="LW"),
     app_commands.Choice(name="RW - Right Winger", value="RW"),
@@ -262,45 +294,44 @@ async def maintenance_cmd(interaction: discord.Interaction, status: str):
     app_commands.Choice(name="RB - Right Back", value="RB"),
     app_commands.Choice(name="GK - Goalkeeper", value="GK"),
 ])
-async def skill_guide_cmd(interaction: discord.Interaction, position: str, playstyle: str):
-    await interaction.response.defer()
+async def skill_guide_cmd(interaction: discord.Interaction, position: str):
+    position = position.upper()
     
-    guide = get_skill_guide(position, playstyle)
+    # Get playstyle options for this position
+    options = get_position_options(position)
     
-    if not guide:
-        # Get available options for error message
-        options = get_position_options(position)
-        options_text = "\n".join([f"• {opt['skill_name']}" for opt in options])
-        
-        await interaction.followup.send(embed=discord.Embed(
-            title="❌ No Skill Guide Found",
-            description=f"No recommendations available for **{position}** with playstyle **{playstyle}**.\n\n"
-                         f"**Available playstyles for {position}:**\n{options_text}",
-            color=0xE74C3C).set_footer(text="FELIX PR"))
+    if not options:
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title="❌ No Options Found",
+                description=f"No playstyle options available for **{position}**.",
+                color=0xE74C3C
+            ).set_footer(text="FELIX PR"),
+            ephemeral=True
+        )
         return
     
+    # Create embed with instructions
     embed = discord.Embed(
         title=f"🎯 Skill Point Guide - {position}",
-        description=f"**Your Playstyle:** {guide['skill_name']}",
+        description=f"**Select your playstyle:**\n\n"
+                     f"*Choose one of the options below:*",
         color=0x8B5CF6
     )
     
-    for i, skill in enumerate(guide["recommendations"], 1):
+    # Add playstyle options to embed
+    for i, opt in enumerate(options, 1):
         embed.add_field(
-            name=f"{i}. {skill}",
-            value="✅ Recommended",
+            name=f"{i}. {opt['skill_name']}",
+            value=opt['note'],
             inline=False
         )
     
-    embed.add_field(
-        name="📝 Note",
-        value=guide.get("note", "Recommended skill point combination"),
-        inline=False
-    )
+    embed.set_footer(text="FELIX PR | Click a button below")
     
-    embed.set_footer(text="FELIX PR | Skill Point Guide")
-    
-    await interaction.followup.send(embed=embed)
+    # Create and send view with buttons
+    view = PlaystyleView(position)
+    await interaction.response.send_message(embed=embed, view=view)
 
 # =============================================
 # === ANNOUNCE TOP 10 COMMAND ===
@@ -772,7 +803,7 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="🏆 `/top10 <pos>`", value="View Top 10 poster", inline=False)
     embed.add_field(name="🔧 Top 10 Mgmt", value="`/top10_add` `/top10_add_badges` `/top10_remove` `/top10_swap`\n`/top10_debug` `/top10_clear` `/top10_import`", inline=False)
     embed.add_field(name="💎 Shard Guide", value="`/shard_add` `/shard_guide week: max_shards: value_tier: player_name:`\n`/shard_weeks` `/shard_remove player_id:` `/shard_reset_week`", inline=False)
-    embed.add_field(name="🎯 Skill Guide", value="`/skill_guide position: playstyle:`\n*Playstyle options appear based on selected position!*", inline=False)
+    embed.add_field(name="🎯 Skill Guide", value="`/skill_guide position:`\n*Select your position, then click a playstyle button!*", inline=False)
     embed.add_field(name="📢 `/announce_top10`", value="Announce Top 10 update in a channel", inline=False)
     embed.add_field(name="💾 `/backup` & `/restore`", value="Backup/restore all data (incl. shards)", inline=False)
     embed.add_field(name="📊 `/stats` & `/dbcheck`", value="Statistics & diagnostics", inline=False)
