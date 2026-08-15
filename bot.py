@@ -6,6 +6,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from database import Top10Database, ShardDatabase
 from poster_generator import Top10Poster
+from skill_guide import SKILL_GUIDE, get_skill_guide, get_position_options
 import threading
 from flask import Flask
 import json
@@ -176,6 +177,7 @@ async def on_ready():
     print(f'✅ Logged in as {bot.user}')
     print(f'🏆 Top 10: Active (4+4+4 DB Split)')
     print(f'💎 Shard Guide: Active (Week + Multi-Filter)')
+    print(f'🎯 Skill Point Guide: Active')
     print(f'🔧 Maintenance Mode: {"🟢 ON" if maintenance_mode else "🟢 OFF"}')
     print(f'👑 Admins: {BOT_OWNER_ID}, {CO_OWNER_ID}')
     bot.loop.create_task(self_ping())
@@ -204,6 +206,66 @@ async def maintenance_cmd(interaction: discord.Interaction, status: str):
     )
     embed.set_footer(text="FELIX PR")
     await interaction.response.send_message(embed=embed)
+
+# =============================================
+# === SKILL POINT GUIDE COMMAND ===
+# =============================================
+
+@bot.tree.command(name="skill_guide", description="Get skill point recommendations for your player")
+@maintenance_check()
+@app_commands.describe(
+    position="Position of your player",
+    playstyle="Your player's current skill point or workrate"
+)
+@app_commands.choices(position=[
+    app_commands.Choice(name="LW - Left Winger", value="LW"),
+    app_commands.Choice(name="RW - Right Winger", value="RW"),
+    app_commands.Choice(name="ST - Striker", value="ST"),
+    app_commands.Choice(name="LM - Left Midfielder", value="LM"),
+    app_commands.Choice(name="RM - Right Midfielder", value="RM"),
+    app_commands.Choice(name="CAM - Attacking Midfielder", value="CAM"),
+    app_commands.Choice(name="CDM - Defensive Midfielder", value="CDM"),
+    app_commands.Choice(name="CM - Central Midfielder", value="CM"),
+    app_commands.Choice(name="CB - Centre Back", value="CB"),
+    app_commands.Choice(name="LB - Left Back", value="LB"),
+    app_commands.Choice(name="RB - Right Back", value="RB"),
+    app_commands.Choice(name="GK - Goalkeeper", value="GK"),
+])
+async def skill_guide_cmd(interaction: discord.Interaction, position: str, playstyle: str):
+    await interaction.response.defer()
+    
+    guide = get_skill_guide(position, playstyle)
+    
+    if not guide:
+        await interaction.followup.send(embed=discord.Embed(
+            title="❌ No Skill Guide Found",
+            description=f"No recommendations available for **{position}** with playstyle **{playstyle}**.\n\n"
+                         "Try different playstyle or position!",
+            color=0xE74C3C).set_footer(text="FELIX PR"))
+        return
+    
+    embed = discord.Embed(
+        title=f"🎯 Skill Point Guide - {position}",
+        description=f"**Your Playstyle:** {guide['skill_name']}",
+        color=0x8B5CF6
+    )
+    
+    for i, skill in enumerate(guide["recommendations"], 1):
+        embed.add_field(
+            name=f"{i}. {skill}",
+            value="✅ Recommended",
+            inline=False
+        )
+    
+    embed.add_field(
+        name="📝 Note",
+        value=guide.get("note", "Recommended skill point combination"),
+        inline=False
+    )
+    
+    embed.set_footer(text="FELIX PR | Skill Point Guide")
+    
+    await interaction.followup.send(embed=embed)
 
 # =============================================
 # === ANNOUNCE TOP 10 COMMAND ===
@@ -312,7 +374,6 @@ async def shard_guide(interaction: discord.Interaction, week: int,
     total_in_week = len(players)
     active_filters = []
     
-    # Filter by value_tier
     if value_tier:
         players = [p for p in players if p['value_tier'] == value_tier]
         active_filters.append(f"Tier: {TIER_EMOJI.get(value_tier, '')} `{value_tier}`")
@@ -323,7 +384,6 @@ async def shard_guide(interaction: discord.Interaction, week: int,
                 color=0xE74C3C).set_footer(text="FELIX PR"))
             return
     
-    # Filter by player name
     if player_name:
         players = [p for p in players if player_name.lower() in p['player_name'].lower()]
         active_filters.append(f"Name: `{player_name}`")
@@ -334,7 +394,6 @@ async def shard_guide(interaction: discord.Interaction, week: int,
                 color=0xE74C3C).set_footer(text="FELIX PR"))
             return
     
-    # Filter by max shards
     if max_shards is not None:
         players = [p for p in players if p['shard_cost'] <= max_shards]
         active_filters.append(f"≤{max_shards} shards")
@@ -347,12 +406,10 @@ async def shard_guide(interaction: discord.Interaction, week: int,
                 color=0xE74C3C).set_footer(text="FELIX PR | Try a higher limit"))
             return
     
-    # Build title
     title = f"💎 Shard Value Guide - Week {week}"
     if active_filters:
         title += f" ({', '.join(active_filters)})"
     
-    # Header
     header_desc = f"**{len(players)}/{total_in_week} players** shown\n"
     if active_filters:
         header_desc += f"Filters: {', '.join(active_filters)}\n"
@@ -624,8 +681,7 @@ async def restore_command(interaction: discord.Interaction,
     top10_3_file: discord.Attachment = None, shards_file: discord.Attachment = None,
     config_file: discord.Attachment = None):
     if not is_admin(interaction.user.id):
-        await interaction.response.send_message("❌ Admin only!", ephemeral=True); return
-    await interaction.response.defer(ephemeral=True)
+        await interaction.response.send_message("❌ Admin only!", ephemeral=True); return    await interaction.response.defer(ephemeral=True)
     restored, failed = [], []
     for file_obj, name in [(top10_1_file,'top10_1.db'),(top10_2_file,'top10_2.db'),
                            (top10_3_file,'top10_3.db'),(shards_file,'shards.db')]:
@@ -674,15 +730,16 @@ async def stats_command(interaction: discord.Interaction):
 @bot.tree.command(name="help", description="Show all commands")
 @maintenance_check()
 async def help_command(interaction: discord.Interaction):
-    embed = discord.Embed(title="📚 FELIX PR - Help", color=0x8B5CF6, description="FC Mobile Top 10 & Shard Guide Bot")
+    embed = discord.Embed(title="📚 FELIX PR - Help", color=0x8B5CF6, description="FC Mobile Top 10, Shard & Skill Guide Bot")
     embed.add_field(name="🏆 `/top10 <pos>`", value="View Top 10 poster", inline=False)
     embed.add_field(name="🔧 Top 10 Mgmt", value="`/top10_add` `/top10_add_badges` `/top10_remove` `/top10_swap`\n`/top10_debug` `/top10_clear` `/top10_import`", inline=False)
     embed.add_field(name="💎 Shard Guide", value="`/shard_add` `/shard_guide week: max_shards: value_tier: player_name:`\n`/shard_weeks` `/shard_remove player_id:` `/shard_reset_week`", inline=False)
+    embed.add_field(name="🎯 Skill Guide", value="`/skill_guide position: playstyle:`", inline=False)
     embed.add_field(name="📢 `/announce_top10`", value="Announce Top 10 update in a channel", inline=False)
     embed.add_field(name="💾 `/backup` & `/restore`", value="Backup/restore all data (incl. shards)", inline=False)
     embed.add_field(name="📊 `/stats` & `/dbcheck`", value="Statistics & diagnostics", inline=False)
     embed.add_field(name="🔧 `/maintenance on/off`", value="Toggle maintenance mode (Admin)", inline=False)
-    embed.set_footer(text="FELIX PR | 4+4+4 DB Split | Shard Guide + Multi-Filter")
+    embed.set_footer(text="FELIX PR | 4+4+4 DB Split | Full Guide System")
     await interaction.response.send_message(embed=embed)
 
 if __name__ == "__main__":
