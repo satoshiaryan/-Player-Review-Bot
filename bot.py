@@ -183,6 +183,36 @@ async def on_ready():
     bot.loop.create_task(self_ping())
 
 # =============================================
+# === PLAYSTYLE AUTOCOMPLETE ===
+# =============================================
+
+async def playstyle_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    """
+    Autocomplete for playstyle based on selected position
+    """
+    # Get the position value from the interaction namespace
+    position = interaction.namespace.get('position', '')
+    
+    if not position:
+        return []
+    
+    # Get all playstyle options for this position
+    options = get_position_options(position)
+    
+    # Filter based on what user has typed so far
+    filtered_options = [
+        app_commands.Choice(name=opt['skill_name'], value=opt['skill_name'])
+        for opt in options
+        if current.lower() in opt['skill_name'].lower()
+    ]
+    
+    # Discord allows max 25 choices
+    return filtered_options[:25]
+
+# =============================================
 # === MAINTENANCE COMMAND ===
 # =============================================
 
@@ -217,6 +247,7 @@ async def maintenance_cmd(interaction: discord.Interaction, status: str):
     position="Position of your player",
     playstyle="Your player's current skill point or workrate"
 )
+@app_commands.autocomplete(playstyle=playstyle_autocomplete)
 @app_commands.choices(position=[
     app_commands.Choice(name="LW - Left Winger", value="LW"),
     app_commands.Choice(name="RW - Right Winger", value="RW"),
@@ -237,10 +268,14 @@ async def skill_guide_cmd(interaction: discord.Interaction, position: str, plays
     guide = get_skill_guide(position, playstyle)
     
     if not guide:
+        # Get available options for error message
+        options = get_position_options(position)
+        options_text = "\n".join([f"• {opt['skill_name']}" for opt in options])
+        
         await interaction.followup.send(embed=discord.Embed(
             title="❌ No Skill Guide Found",
             description=f"No recommendations available for **{position}** with playstyle **{playstyle}**.\n\n"
-                         "Try different playstyle or position!",
+                         f"**Available playstyles for {position}:**\n{options_text}",
             color=0xE74C3C).set_footer(text="FELIX PR"))
         return
     
@@ -681,7 +716,10 @@ async def restore_command(interaction: discord.Interaction,
     top10_3_file: discord.Attachment = None, shards_file: discord.Attachment = None,
     config_file: discord.Attachment = None):
     if not is_admin(interaction.user.id):
-        await interaction.response.send_message("❌ Admin only!", ephemeral=True); return    await interaction.response.defer(ephemeral=True)
+        await interaction.response.send_message("❌ Admin only!", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=True)
     restored, failed = [], []
     for file_obj, name in [(top10_1_file,'top10_1.db'),(top10_2_file,'top10_2.db'),
                            (top10_3_file,'top10_3.db'),(shards_file,'shards.db')]:
@@ -734,7 +772,7 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="🏆 `/top10 <pos>`", value="View Top 10 poster", inline=False)
     embed.add_field(name="🔧 Top 10 Mgmt", value="`/top10_add` `/top10_add_badges` `/top10_remove` `/top10_swap`\n`/top10_debug` `/top10_clear` `/top10_import`", inline=False)
     embed.add_field(name="💎 Shard Guide", value="`/shard_add` `/shard_guide week: max_shards: value_tier: player_name:`\n`/shard_weeks` `/shard_remove player_id:` `/shard_reset_week`", inline=False)
-    embed.add_field(name="🎯 Skill Guide", value="`/skill_guide position: playstyle:`", inline=False)
+    embed.add_field(name="🎯 Skill Guide", value="`/skill_guide position: playstyle:`\n*Playstyle options appear based on selected position!*", inline=False)
     embed.add_field(name="📢 `/announce_top10`", value="Announce Top 10 update in a channel", inline=False)
     embed.add_field(name="💾 `/backup` & `/restore`", value="Backup/restore all data (incl. shards)", inline=False)
     embed.add_field(name="📊 `/stats` & `/dbcheck`", value="Statistics & diagnostics", inline=False)
