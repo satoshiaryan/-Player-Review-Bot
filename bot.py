@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from database import Top10Database, ShardDatabase
 from poster_generator import Top10Poster
 from skill_guide import SKILL_GUIDE, get_skill_guide, get_position_options
+from playstyle_guide import get_playstyle_guide, get_mode_playstyles
 import threading
 from flask import Flask
 import json
@@ -178,6 +179,7 @@ async def on_ready():
     print(f'🏆 Top 10: Active (4+4+4 DB Split)')
     print(f'💎 Shard Guide: Active (Week + Multi-Filter)')
     print(f'🎯 Skill Point Guide: Active')
+    print(f'⚔️ Playstyle Guide: Active')
     print(f'🔧 Maintenance Mode: {"🟢 ON" if maintenance_mode else "🟢 OFF"}')
     print(f'👑 Admins: {BOT_OWNER_ID}, {CO_OWNER_ID}')
     bot.loop.create_task(self_ping())
@@ -332,6 +334,63 @@ async def skill_guide_cmd(interaction: discord.Interaction, position: str):
     # Create and send view with buttons
     view = PlaystyleView(position)
     await interaction.response.send_message(embed=embed, view=view)
+
+# =============================================
+# === PLAYSTYLE GUIDE COMMAND ===
+# =============================================
+
+@bot.tree.command(name="playstyle_guide", description="Best playstyles for each game mode")
+@maintenance_check()
+@app_commands.describe(mode="Select game mode")
+@app_commands.choices(mode=[
+    app_commands.Choice(name="⚔️ H2H - Head to Head", value="H2H"),
+    app_commands.Choice(name="👔 MM - Manager Mode", value="MM"),
+    app_commands.Choice(name="🎯 VSA - VS Attack", value="VSA"),
+])
+async def playstyle_guide_cmd(interaction: discord.Interaction, mode: str):
+    mode = mode.upper()
+    
+    # Get playstyle data for the selected mode
+    mode_data = get_playstyle_guide(mode)
+    
+    if not mode_data:
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title="❌ Invalid Mode",
+                description=f"No playstyle data available for **{mode}**.",
+                color=0xE74C3C
+            ).set_footer(text="FELIX PR"),
+            ephemeral=True
+        )
+        return
+    
+    # Create embed
+    embed = discord.Embed(
+        title=f"{mode_data['emoji']} Best Playstyles - {mode_data['name']}",
+        description=f"**{mode_data['description']}**\n\n"
+                     f"*Best playstyles for this mode:*",
+        color=0x3498db
+    )
+    
+    # Add playstyles by category
+    for category, data in mode_data['categories'].items():
+        category_emoji = data['emoji']
+        playstyles = data['playstyles']
+        
+        if playstyles:
+            playstyle_text = "\n".join([f"• {ps}" for ps in playstyles])
+        else:
+            playstyle_text = "*No specific playstyles for this mode*"
+        
+        embed.add_field(
+            name=f"{category_emoji} {category}",
+            value=playstyle_text,
+            inline=False
+        )
+    
+    embed.set_footer(text="FELIX PR | Playstyle Guide")
+    
+    await interaction.response.send_message(embed=embed)
 
 # =============================================
 # === ANNOUNCE TOP 10 COMMAND ===
@@ -804,6 +863,7 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="🔧 Top 10 Mgmt", value="`/top10_add` `/top10_add_badges` `/top10_remove` `/top10_swap`\n`/top10_debug` `/top10_clear` `/top10_import`", inline=False)
     embed.add_field(name="💎 Shard Guide", value="`/shard_add` `/shard_guide week: max_shards: value_tier: player_name:`\n`/shard_weeks` `/shard_remove player_id:` `/shard_reset_week`", inline=False)
     embed.add_field(name="🎯 Skill Guide", value="`/skill_guide position:`\n*Select your position, then click a playstyle button!*", inline=False)
+    embed.add_field(name="⚔️ Playstyle Guide", value="`/playstyle_guide mode:`\n*See best playstyles for H2H, MM, or VSA!*", inline=False)
     embed.add_field(name="📢 `/announce_top10`", value="Announce Top 10 update in a channel", inline=False)
     embed.add_field(name="💾 `/backup` & `/restore`", value="Backup/restore all data (incl. shards)", inline=False)
     embed.add_field(name="📊 `/stats` & `/dbcheck`", value="Statistics & diagnostics", inline=False)
