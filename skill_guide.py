@@ -102,11 +102,17 @@ SKILL_GUIDE = {
     # ====================
     # === CENTRE BACKS (CB) ===
     # ====================
-    "CB_Any": {
+    "CB_MH": {
         "positions": ["CB"],
-        "skill_name": "Centre Back (All Types)",
-        "recommendations": ["Scoring", "Physical", "Defending"],
-        "note": "Irrespective of first skill point"
+        "skill_name": "CB (M/H Workrate)",
+        "recommendations": ["Scoring", "Defending", "Physical"],
+        "note": "For CBs with M/H workrate"
+    },
+    "CB_LH": {
+        "positions": ["CB"],
+        "skill_name": "CB - Defender/Stopper (L/H Workrate)",
+        "recommendations": ["Dribbling", "Defending", "Physical"],
+        "note": "For first skill point Defender or Stopper with L/H workrate"
     },
 
     # ====================
